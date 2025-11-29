@@ -15,10 +15,21 @@ import type {
   OAuthCredentials,
   ToolCallResult,
   ServerInstance,
+  TransportType,
 } from './types';
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const STORAGE_KEY = 'mcp-servers';
+
+// Detect transport type based on URL pattern
+function detectTransportType(url: string): TransportType {
+  // URLs ending with /sse typically use SSE transport
+  if (url.endsWith('/sse') || url.includes('/sse?')) {
+    return 'sse';
+  }
+  // Otherwise assume Streamable HTTP transport
+  return 'streamable-http';
+}
 
 interface UseMultiServerMcpOptions {
   onNotification?: (serverId: string, method: string, params: unknown) => void;
@@ -28,6 +39,7 @@ interface UseMultiServerMcpOptions {
 
 interface ServerConnection {
   serverUrl: string;
+  transport: TransportType;
   credentials: OAuthCredentials | null;
   sessionId: string | null;
   messageEndpoint: string | null;
@@ -130,6 +142,9 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     };
 
     const targetUrl = connection.messageEndpoint || connection.serverUrl;
+    const apiEndpoint = connection.transport === 'streamable-http'
+      ? '/api/mcp/streamable'
+      : '/api/mcp/message';
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -148,7 +163,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
 
     console.log(`[${serverId}] Sending MCP notification:`, method);
 
-    fetch('/api/mcp/message', {
+    fetch(apiEndpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(notification),
@@ -172,6 +187,100 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       params,
     };
 
+    // For Streamable HTTP, send request and wait for direct response
+    if (connection.transport === 'streamable-http') {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-mcp-server-url': connection.serverUrl,
+      };
+
+      if (connection.credentials) {
+        const tokenType = (connection.credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
+        headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
+      }
+
+      if (connection.sessionId) {
+        headers['x-mcp-session-id'] = connection.sessionId;
+      }
+
+      console.log(`[${serverId}] Sending Streamable HTTP request:`, method);
+
+      const response = await fetch('/api/mcp/streamable', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request),
+      });
+
+      // Capture session ID from response
+      const responseSessionId = response.headers.get('mcp-session-id');
+      if (responseSessionId) {
+        connection.sessionId = responseSessionId;
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+
+      // Handle SSE responses (streaming)
+      if (contentType.includes('text/event-stream') && response.body) {
+        return new Promise((resolve, reject) => {
+          const reader = response.body!.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          const processStream = async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                  if (line.startsWith('data:')) {
+                    const data = line.slice(5).trim();
+                    if (data) {
+                      try {
+                        const parsed = JSON.parse(data) as MCPResponse;
+                        if ('id' in parsed && String(parsed.id) === id) {
+                          if (parsed.error) {
+                            reject(new Error(`${parsed.error.message} (code: ${parsed.error.code})`));
+                          } else {
+                            resolve(parsed.result);
+                          }
+                          return;
+                        }
+                      } catch {
+                        // Continue reading
+                      }
+                    }
+                  }
+                }
+              }
+              reject(new Error('Stream ended without response'));
+            } catch (error) {
+              reject(error);
+            }
+          };
+
+          processStream();
+        });
+      }
+
+      // Handle JSON responses
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Request failed: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(`${data.error.message} (code: ${data.error.code})`);
+      }
+      return data.result;
+    }
+
+    // For SSE transport, use pending requests map
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         connection.pendingRequests.delete(id);
@@ -323,9 +432,13 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       throw new Error('Server not found');
     }
 
+    // Detect transport type based on URL
+    const transport = detectTransportType(server.url);
+
     // Create connection state
     const connection: ServerConnection = {
       serverUrl: server.url,
+      transport,
       credentials: credentials || server.credentials || null,
       sessionId: null,
       messageEndpoint: null,
@@ -334,100 +447,108 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     };
 
     connectionsRef.current.set(serverId, connection);
-    updateServer(serverId, { status: 'connecting', credentials });
+    updateServer(serverId, { status: 'connecting', credentials, transport });
     options.onServerChange?.(serverId, 'connecting');
 
     try {
-      const sseUrl = new URL('/api/mcp/sse', window.location.origin);
-      const headers: Record<string, string> = {
-        'Accept': 'text/event-stream',
-        'x-mcp-server-url': server.url,
-      };
+      // For Streamable HTTP transport, go directly to initialization
+      if (transport === 'streamable-http') {
+        console.log(`[${serverId}] Using Streamable HTTP transport`);
+        updateServer(serverId, { status: 'authenticating' });
+      } else {
+        // For SSE transport, establish SSE connection first
+        console.log(`[${serverId}] Using SSE transport`);
+        const sseUrl = new URL('/api/mcp/sse', window.location.origin);
+        const headers: Record<string, string> = {
+          'Accept': 'text/event-stream',
+          'x-mcp-server-url': server.url,
+        };
 
-      if (connection.credentials) {
-        // Normalize token type to 'Bearer' (capitalized) as per RFC 6750
-        const tokenType = (connection.credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
-        headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
-      }
+        if (connection.credentials) {
+          // Normalize token type to 'Bearer' (capitalized) as per RFC 6750
+          const tokenType = (connection.credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
+          headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
+        }
 
-      const response = await fetch(sseUrl, {
-        headers,
-        signal: connection.abortController?.signal,
-      });
+        const response = await fetch(sseUrl, {
+          headers,
+          signal: connection.abortController?.signal,
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to connect: ${response.status} - ${errorText}`);
-      }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to connect: ${response.status} - ${errorText}`);
+        }
 
-      if (!response.body) {
-        throw new Error('No response body');
-      }
+        if (!response.body) {
+          throw new Error('No response body');
+        }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-      const handleMessage = createMessageHandler(serverId);
-      const handleEndpoint = createEndpointHandler(serverId);
+        const handleMessage = createMessageHandler(serverId);
+        const handleEndpoint = createEndpointHandler(serverId);
 
-      const processStream = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        const processStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
+              buffer += decoder.decode(value, { stream: true });
 
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
 
-            let eventType = 'message';
-            let eventData = '';
+              let eventType = 'message';
+              let eventData = '';
 
-            for (const line of lines) {
-              if (line.startsWith('event:')) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith('data:')) {
-                eventData = line.slice(5).trim();
-              } else if (line === '' && eventData) {
-                if (eventType === 'endpoint') {
-                  handleEndpoint(eventData);
-                } else if (eventType === 'message') {
-                  handleMessage(eventData);
+              for (const line of lines) {
+                if (line.startsWith('event:')) {
+                  eventType = line.slice(6).trim();
+                } else if (line.startsWith('data:')) {
+                  eventData = line.slice(5).trim();
+                } else if (line === '' && eventData) {
+                  if (eventType === 'endpoint') {
+                    handleEndpoint(eventData);
+                  } else if (eventType === 'message') {
+                    handleMessage(eventData);
+                  }
+                  eventType = 'message';
+                  eventData = '';
                 }
-                eventType = 'message';
-                eventData = '';
+              }
+            }
+          } catch (error) {
+            if (!(error instanceof Error && error.name === 'AbortError')) {
+              const currentServer = servers.find(s => s.id === serverId);
+              if (currentServer?.status === 'connected') {
+                updateServer(serverId, { status: 'error', error: 'Connection lost' });
+                options.onError?.(serverId, new Error('Connection lost'));
               }
             }
           }
-        } catch (error) {
-          if (!(error instanceof Error && error.name === 'AbortError')) {
-            const currentServer = servers.find(s => s.id === serverId);
-            if (currentServer?.status === 'connected') {
-              updateServer(serverId, { status: 'error', error: 'Connection lost' });
-              options.onError?.(serverId, new Error('Connection lost'));
+        };
+
+        processStream();
+
+        // Wait for endpoint
+        const waitForEndpoint = async (timeoutMs: number = 10000): Promise<void> => {
+          const startTime = Date.now();
+          while (!connection.messageEndpoint) {
+            if (Date.now() - startTime > timeoutMs) {
+              throw new Error('Timeout waiting for session endpoint');
             }
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
-        }
-      };
+        };
 
-      processStream();
+        await waitForEndpoint();
 
-      // Wait for endpoint
-      const waitForEndpoint = async (timeoutMs: number = 10000): Promise<void> => {
-        const startTime = Date.now();
-        while (!connection.messageEndpoint) {
-          if (Date.now() - startTime > timeoutMs) {
-            throw new Error('Timeout waiting for session endpoint');
-          }
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      };
-
-      await waitForEndpoint();
-
-      updateServer(serverId, { status: 'authenticating' });
+        updateServer(serverId, { status: 'authenticating' });
+      }
 
       const initResult = await sendRequest(serverId, 'initialize', {
         protocolVersion: MCP_PROTOCOL_VERSION,
