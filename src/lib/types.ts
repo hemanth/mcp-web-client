@@ -137,6 +137,10 @@ export interface ToolCallResult {
   isError?: boolean;
 }
 
+// Transport Types
+
+export type TransportType = 'sse' | 'streamable-http';
+
 // Multi-Server Types
 
 export interface ServerInstance {
@@ -144,6 +148,7 @@ export interface ServerInstance {
   url: string;
   name: string;
   status: ConnectionStatus;
+  transport?: TransportType;
   error?: string;
   serverInfo?: MCPServerInfo;
   capabilities?: MCPCapabilities;
