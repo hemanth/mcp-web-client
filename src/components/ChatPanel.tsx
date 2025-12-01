@@ -225,12 +225,12 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
               </div>
             )}
 
-            <div className={`max-w-[80%] ${message.role === 'user' ? 'order-first' : ''}`}>
+            <div className={`max-w-[85%] md:max-w-[80%] min-w-0 ${message.role === 'user' ? 'order-first' : ''}`}>
               {message.role === 'tool' && message.toolName && (
-                <div className="text-xs text-[var(--foreground-muted)] mb-1 flex items-center gap-1">
-                  <span className="text-[var(--accent)]">@{message.toolName}</span>
+                <div className="text-xs text-[var(--foreground-muted)] mb-1 flex flex-wrap items-center gap-1 overflow-hidden">
+                  <span className="text-[var(--accent)] flex-shrink-0">@{message.toolName}</span>
                   {message.toolArgs && Object.keys(message.toolArgs).length > 0 && (
-                    <span className="text-[var(--foreground-muted)]">
+                    <span className="text-[var(--foreground-muted)] truncate">
                       ({Object.entries(message.toolArgs).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})
                     </span>
                   )}
@@ -252,7 +252,7 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
                     <span className="text-sm">Executing...</span>
                   </div>
                 ) : (
-                  <pre className="text-sm whitespace-pre-wrap font-sans">{message.content}</pre>
+                  <pre className="text-sm whitespace-pre-wrap font-sans break-words overflow-x-auto">{message.content}</pre>
                 )}
               </div>
 
@@ -299,8 +299,8 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
         </form>
 
         {!disabled && tools.length > 0 && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-[var(--foreground-muted)]">
-            <span>Quick:</span>
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--foreground-muted)] overflow-x-auto scrollbar-none">
+            <span className="flex-shrink-0">Quick:</span>
             {tools.slice(0, 3).map(tool => (
               <button
                 key={tool.name}
@@ -308,7 +308,7 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
                   setInput(`@${tool.name} `);
                   inputRef.current?.focus();
                 }}
-                className="px-2 py-0.5 bg-[var(--background-tertiary)] hover:bg-[var(--border)] rounded text-[var(--accent)]"
+                className="flex-shrink-0 px-2 py-0.5 bg-[var(--background-tertiary)] hover:bg-[var(--border)] rounded text-[var(--accent)] truncate max-w-[120px]"
               >
                 @{tool.name}
               </button>
