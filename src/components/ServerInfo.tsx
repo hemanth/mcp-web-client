@@ -1,6 +1,7 @@
 'use client';
 
-import { Server, Wrench, FileText, BookOpen, Check, X, Info } from 'lucide-react';
+import { memo } from 'react';
+import { Server, Wrench, FileText, BookOpen, X, Info } from 'lucide-react';
 import type { MCPServerInfo, MCPCapabilities } from '@/lib/types';
 
 interface ServerInfoProps {
@@ -11,7 +12,7 @@ interface ServerInfoProps {
   promptsCount: number;
 }
 
-export function ServerInfo({
+export const ServerInfo = memo(function ServerInfo({
   serverInfo,
   capabilities,
   toolsCount,
@@ -81,4 +82,4 @@ export function ServerInfo({
       </div>
     </div>
   );
-}
+});

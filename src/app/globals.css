@@ -19,15 +19,21 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - GPU accelerated */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -46,11 +52,19 @@ body {
   background: var(--foreground-muted);
 }
 
-/* Smooth transitions */
-* {
-  transition-property: background-color, border-color, color, opacity;
-  transition-duration: 150ms;
-  transition-timing-function: ease;
+/* Transitions only on interactive elements - avoid layout thrashing */
+button,
+a,
+input,
+textarea,
+select,
+[role="button"] {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease, transform 150ms ease;
+}
+
+/* GPU-accelerated transforms for animations */
+.will-change-transform {
+  will-change: transform;
 }
 
 /* Glow effects */
@@ -62,11 +76,12 @@ body {
   box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
 }
 
-/* Glass morphism */
+/* Glass morphism - use GPU */
 .glass {
   background: rgba(18, 18, 26, 0.8);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border);
+  transform: translateZ(0);
 }
 
 /* Gradient text */
@@ -77,7 +92,7 @@ body {
   background-clip: text;
 }
 
-/* Pulse animation for status indicators */
+/* Pulse animation - GPU accelerated */
 @keyframes pulse-glow {
   0%, 100% {
     opacity: 1;
@@ -91,4 +106,56 @@ body {
 
 .pulse-glow {
   animation: pulse-glow 2s infinite;
+  will-change: opacity, box-shadow;
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .pulse-glow {
+    animation: none;
+  }
+}
+
+/* Content visibility for off-screen elements */
+.content-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 500px;
+}
+
+/* Optimize rendering */
+.contain-layout {
+  contain: layout;
+}
+
+.contain-paint {
+  contain: paint;
+}
+
+/* Skeleton loading placeholder */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--background-tertiary) 0%,
+    var(--border) 50%,
+    var(--background-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }

@@ -1,15 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, Suspense, lazy, memo } from 'react';
 import { Toaster, toast } from 'sonner';
 import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
 import { useOAuth } from '@/lib/useOAuth';
 import { ServerList } from '@/components/ServerList';
 import { ServerInfo } from '@/components/ServerInfo';
-import { ToolsPanel } from '@/components/ToolsPanel';
-import { ResourcesPanel } from '@/components/ResourcesPanel';
-import { PromptsPanel } from '@/components/PromptsPanel';
-import { ChatPanel } from '@/components/ChatPanel';
 import type { OAuthCredentials } from '@/lib/types';
 import {
   MessageSquare,
@@ -21,9 +17,74 @@ import {
   ChevronRight,
   Server,
   Layers,
+  Loader2,
 } from 'lucide-react';
 
+// Dynamic imports for code splitting - panels are lazy loaded
+const ChatPanel = lazy(() => import('@/components/ChatPanel').then(m => ({ default: m.ChatPanel })));
+const ToolsPanel = lazy(() => import('@/components/ToolsPanel').then(m => ({ default: m.ToolsPanel })));
+const ResourcesPanel = lazy(() => import('@/components/ResourcesPanel').then(m => ({ default: m.ResourcesPanel })));
+const PromptsPanel = lazy(() => import('@/components/PromptsPanel').then(m => ({ default: m.PromptsPanel })));
+
 type ActivePanel = 'chat' | 'tools' | 'resources' | 'prompts';
+
+// Loading fallback component
+const PanelLoader = memo(function PanelLoader() {
+  return (
+    <div className="h-full flex items-center justify-center">
+      <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" />
+    </div>
+  );
+});
+
+// Memoized nav item component
+const NavItem = memo(function NavItem({
+  id,
+  label,
+  icon: Icon,
+  count,
+  isActive,
+  disabled,
+  collapsed,
+  onClick,
+}: {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  count: number | null;
+  isActive: boolean;
+  disabled: boolean;
+  collapsed: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+        isActive
+          ? 'bg-[var(--accent)] text-white'
+          : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <Icon className="w-5 h-5 flex-shrink-0" />
+      {!collapsed && (
+        <>
+          <span className="flex-1 text-left">{label}</span>
+          {count !== null && count > 0 && (
+            <span className={`px-2 py-0.5 rounded-full text-xs ${
+              isActive
+                ? 'bg-white/20 text-white'
+                : 'bg-[var(--background-tertiary)] text-[var(--foreground-muted)]'
+            }`}>
+              {count}
+            </span>
+          )}
+        </>
+      )}
+    </button>
+  );
+});
 
 export default function Home() {
   const [activePanel, setActivePanel] = useState<ActivePanel>('chat');
@@ -31,11 +92,8 @@ export default function Home() {
   const [pendingOAuthServer, setPendingOAuthServer] = useState<string | null>(null);
 
   const {
-    isAuthenticating,
-    getCredentials,
     registerClient,
     startOAuth,
-    setBearerToken,
   } = useOAuth();
 
   const {
@@ -50,27 +108,20 @@ export default function Home() {
     callTool,
     readResource,
     getPrompt,
-    getAllTools,
-    getAllResources,
-    getAllPrompts,
   } = useMultiServerMcp({
-    onNotification: (serverId, method, params) => {
-      const server = servers.find(s => s.id === serverId);
-      console.log(`[${server?.name}] Notification:`, method, params);
-      toast.info(`${server?.name}: ${method}`);
-    },
-    onServerChange: (serverId, status) => {
-      const server = servers.find(s => s.id === serverId);
+    onNotification: useCallback((serverId: string, method: string) => {
+      toast.info(`Server notification: ${method}`);
+    }, []),
+    onServerChange: useCallback((serverId: string, status: string) => {
       if (status === 'connected') {
-        toast.success(`Connected to ${server?.name || 'server'}`);
+        toast.success('Connected to server');
       } else if (status === 'error') {
-        toast.error(`Error connecting to ${server?.name || 'server'}`);
+        toast.error('Error connecting to server');
       }
-    },
-    onError: (serverId, error) => {
-      const server = servers.find(s => s.id === serverId);
-      toast.error(`${server?.name || 'Server'}: ${error.message}`);
-    },
+    }, []),
+    onError: useCallback((serverId: string, error: Error) => {
+      toast.error(error.message);
+    }, []),
   });
 
   // Handle OAuth success from popup
@@ -80,18 +131,14 @@ export default function Home() {
 
       if (event.data.type === 'oauth-success') {
         const { serverUrl, accessToken, tokenType } = event.data;
-        console.log('OAuth success received for:', serverUrl);
 
         try {
-          // Find the pending server or add a new one
           let serverId = pendingOAuthServer;
           if (!serverId) {
-            // Look for existing server with this URL
             const existingServer = servers.find(s => s.url === serverUrl);
             if (existingServer) {
               serverId = existingServer.id;
             } else {
-              // Add new server
               serverId = await addServer(serverUrl);
             }
           }
@@ -100,7 +147,7 @@ export default function Home() {
             await connectServer(serverId, { accessToken, tokenType });
           }
         } catch (error) {
-          console.error('Failed to connect after OAuth:', error);
+          // Error handled by onError callback
         } finally {
           setPendingOAuthServer(null);
         }
@@ -111,26 +158,22 @@ export default function Home() {
     return () => window.removeEventListener('message', handleMessage);
   }, [addServer, connectServer, pendingOAuthServer, servers]);
 
-  const handleAddServer = async (url: string, name?: string, credentials?: OAuthCredentials): Promise<string> => {
+  const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials): Promise<string> => {
     return await addServer(url, name, credentials);
-  };
+  }, [addServer]);
 
-  const handleConnectServer = async (serverId: string, credentials?: OAuthCredentials) => {
+  const handleConnectServer = useCallback(async (serverId: string, credentials?: OAuthCredentials) => {
     const server = servers.find(s => s.id === serverId);
     if (!server) return;
 
     try {
-      // Use provided credentials or stored credentials
       await connectServer(serverId, credentials || server.credentials);
-    } catch (error) {
-      console.error('Connection failed:', error);
+    } catch {
+      // Error handled by onError callback
     }
-  };
+  }, [servers, connectServer]);
 
-  const handleStartOAuth = async (serverUrl: string, serverId?: string): Promise<{ success: boolean; error?: string }> => {
-    // Store the serverId to connect after OAuth callback
-    // If serverId is provided (from newly added server), use it directly
-    // Otherwise try to find existing server by URL
+  const handleStartOAuth = useCallback(async (serverUrl: string, serverId?: string): Promise<{ success: boolean; error?: string }> => {
     if (serverId) {
       setPendingOAuthServer(serverId);
     } else {
@@ -140,16 +183,25 @@ export default function Home() {
       }
     }
     return await startOAuth(serverUrl);
-  };
+  }, [servers, startOAuth]);
 
-  const handleRegisterClient = async (serverUrl: string): Promise<{ success: boolean; clientId?: string; error?: string }> => {
+  const handleRegisterClient = useCallback(async (serverUrl: string): Promise<{ success: boolean; clientId?: string; error?: string }> => {
     return await registerClient(serverUrl);
-  };
+  }, [registerClient]);
+
+  const handleDisconnect = useCallback(() => {
+    if (activeServer) {
+      disconnectServer(activeServer.id);
+    }
+  }, [activeServer, disconnectServer]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => !prev);
+  }, []);
 
   const isConnected = activeServer?.status === 'connected';
   const connectedServersCount = servers.filter(s => s.status === 'connected').length;
 
-  // Get current server's data or aggregated data
   const currentTools = activeServer?.tools || [];
   const currentResources = activeServer?.resources || [];
   const currentPrompts = activeServer?.prompts || [];
@@ -176,7 +228,7 @@ export default function Home() {
       />
 
       {/* Sidebar */}
-      <div className={`${sidebarCollapsed ? 'w-16' : 'w-72'} flex-shrink-0 bg-[var(--background-secondary)] border-r border-[var(--border)] flex flex-col transition-all duration-300`}>
+      <div className={`${sidebarCollapsed ? 'w-16' : 'w-72'} flex-shrink-0 bg-[var(--background-secondary)] border-r border-[var(--border)] flex flex-col will-change-transform`}>
         {/* Logo */}
         <div className="p-4 border-b border-[var(--border)]">
           <div className="flex items-center gap-3">
@@ -219,39 +271,24 @@ export default function Home() {
         {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navItems.map((item) => (
-            <button
+            <NavItem
               key={item.id}
-              onClick={() => setActivePanel(item.id)}
+              id={item.id}
+              label={item.label}
+              icon={item.icon}
+              count={item.count}
+              isActive={activePanel === item.id}
               disabled={!isConnected && item.id !== 'chat'}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activePanel === item.id
-                  ? 'bg-[var(--accent)] text-white'
-                  : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
-              } ${!isConnected && item.id !== 'chat' ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <item.icon className="w-5 h-5 flex-shrink-0" />
-              {!sidebarCollapsed && (
-                <>
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {item.count !== null && item.count > 0 && (
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${
-                      activePanel === item.id
-                        ? 'bg-white/20 text-white'
-                        : 'bg-[var(--background-tertiary)] text-[var(--foreground-muted)]'
-                    }`}>
-                      {item.count}
-                    </span>
-                  )}
-                </>
-              )}
-            </button>
+              collapsed={sidebarCollapsed}
+              onClick={() => setActivePanel(item.id)}
+            />
           ))}
         </nav>
 
         {/* Collapse button */}
         <div className="p-3 border-t border-[var(--border)]">
           <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onClick={toggleSidebar}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]"
           >
             {sidebarCollapsed ? (
@@ -294,7 +331,7 @@ export default function Home() {
         {/* Content Area */}
         <div className="flex-1 flex overflow-hidden">
           {/* Main Panel */}
-          <div className={`flex-1 ${isConnected || servers.length > 0 ? 'p-6' : 'p-6 flex items-center justify-center'} overflow-y-auto`}>
+          <div className={`flex-1 ${isConnected || servers.length > 0 ? 'p-6' : 'p-6 flex items-center justify-center'} overflow-y-auto contain-layout`}>
             {servers.length === 0 ? (
               <div className="text-center max-w-md mx-auto">
                 <div className="w-20 h-20 mx-auto rounded-2xl bg-[var(--background-secondary)] flex items-center justify-center mb-6">
@@ -320,45 +357,47 @@ export default function Home() {
               </div>
             ) : (
               <div className="h-full">
-                {activePanel === 'chat' && (
-                  <ChatPanel
-                    tools={currentTools}
-                    onCallTool={callTool}
-                    disabled={!isConnected}
-                    serverName={activeServer?.serverInfo?.name || activeServer?.name}
-                  />
-                )}
+                <Suspense fallback={<PanelLoader />}>
+                  {activePanel === 'chat' && (
+                    <ChatPanel
+                      tools={currentTools}
+                      onCallTool={callTool}
+                      disabled={!isConnected}
+                      serverName={activeServer?.serverInfo?.name || activeServer?.name}
+                    />
+                  )}
 
-                {activePanel === 'tools' && (
-                  <ToolsPanel
-                    tools={currentTools}
-                    onCallTool={callTool}
-                    disabled={!isConnected}
-                  />
-                )}
+                  {activePanel === 'tools' && (
+                    <ToolsPanel
+                      tools={currentTools}
+                      onCallTool={callTool}
+                      disabled={!isConnected}
+                    />
+                  )}
 
-                {activePanel === 'resources' && (
-                  <ResourcesPanel
-                    resources={currentResources}
-                    onReadResource={readResource}
-                    disabled={!isConnected}
-                  />
-                )}
+                  {activePanel === 'resources' && (
+                    <ResourcesPanel
+                      resources={currentResources}
+                      onReadResource={readResource}
+                      disabled={!isConnected}
+                    />
+                  )}
 
-                {activePanel === 'prompts' && (
-                  <PromptsPanel
-                    prompts={currentPrompts}
-                    onGetPrompt={getPrompt}
-                    disabled={!isConnected}
-                  />
-                )}
+                  {activePanel === 'prompts' && (
+                    <PromptsPanel
+                      prompts={currentPrompts}
+                      onGetPrompt={getPrompt}
+                      disabled={!isConnected}
+                    />
+                  )}
+                </Suspense>
               </div>
             )}
           </div>
 
           {/* Server Info Sidebar - When connected */}
           {isConnected && activeServer && (
-            <div className="w-72 p-4 border-l border-[var(--border)] overflow-y-auto bg-[var(--background-secondary)]">
+            <div className="w-72 p-4 border-l border-[var(--border)] overflow-y-auto bg-[var(--background-secondary)] contain-layout">
               <ServerInfo
                 serverInfo={activeServer.serverInfo}
                 capabilities={activeServer.capabilities}
@@ -369,8 +408,8 @@ export default function Home() {
 
               <div className="mt-4 pt-4 border-t border-[var(--border)]">
                 <button
-                  onClick={() => disconnectServer(activeServer.id)}
-                  className="w-full px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium transition-colors"
+                  onClick={handleDisconnect}
+                  className="w-full px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium"
                 >
                   Disconnect
                 </button>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { BookOpen, Send, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check } from 'lucide-react';
 import type { MCPPrompt } from '@/lib/types';
 
@@ -16,7 +16,7 @@ interface PromptCardProps {
   disabled?: boolean;
 }
 
-function PromptCard({ prompt, onGet, disabled }: PromptCardProps) {
+const PromptCard = memo(function PromptCard({ prompt, onGet, disabled }: PromptCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [args, setArgs] = useState<Record<string, string>>({});
   const [result, setResult] = useState<string | null>(null);
@@ -153,9 +153,9 @@ function PromptCard({ prompt, onGet, disabled }: PromptCardProps) {
       )}
     </div>
   );
-}
+});
 
-export function PromptsPanel({ prompts, onGetPrompt, disabled }: PromptsPanelProps) {
+export const PromptsPanel = memo(function PromptsPanel({ prompts, onGetPrompt, disabled }: PromptsPanelProps) {
   const [search, setSearch] = useState('');
 
   const filteredPrompts = prompts.filter(prompt =>
@@ -209,4 +209,4 @@ export function PromptsPanel({ prompts, onGetPrompt, disabled }: PromptsPanelPro
       </div>
     </div>
   );
-}
+});

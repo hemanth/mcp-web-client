@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { FileText, Eye, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check } from 'lucide-react';
 import type { MCPResource } from '@/lib/types';
 
@@ -16,7 +16,7 @@ interface ResourceCardProps {
   disabled?: boolean;
 }
 
-function ResourceCard({ resource, onRead, disabled }: ResourceCardProps) {
+const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: ResourceCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,9 +137,9 @@ function ResourceCard({ resource, onRead, disabled }: ResourceCardProps) {
       )}
     </div>
   );
-}
+});
 
-export function ResourcesPanel({ resources, onReadResource, disabled }: ResourcesPanelProps) {
+export const ResourcesPanel = memo(function ResourcesPanel({ resources, onReadResource, disabled }: ResourcesPanelProps) {
   const [search, setSearch] = useState('');
 
   const filteredResources = resources.filter(resource =>
@@ -194,4 +194,4 @@ export function ResourcesPanel({ resources, onReadResource, disabled }: Resource
       </div>
     </div>
   );
-}
+});
