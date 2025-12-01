@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Wrench, Play, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check } from 'lucide-react';
 import type { MCPTool, ToolCallResult } from '@/lib/types';
 
@@ -16,7 +16,7 @@ interface ToolCardProps {
   disabled?: boolean;
 }
 
-function ToolCard({ tool, onCall, disabled }: ToolCardProps) {
+const ToolCard = memo(function ToolCard({ tool, onCall, disabled }: ToolCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [args, setArgs] = useState<Record<string, string>>({});
   const [result, setResult] = useState<ToolCallResult | null>(null);
@@ -191,9 +191,9 @@ function ToolCard({ tool, onCall, disabled }: ToolCardProps) {
       )}
     </div>
   );
-}
+});
 
-export function ToolsPanel({ tools, onCallTool, disabled }: ToolsPanelProps) {
+export const ToolsPanel = memo(function ToolsPanel({ tools, onCallTool, disabled }: ToolsPanelProps) {
   const [search, setSearch] = useState('');
 
   const filteredTools = tools.filter(tool =>
@@ -247,4 +247,4 @@ export function ToolsPanel({ tools, onCallTool, disabled }: ToolsPanelProps) {
       </div>
     </div>
   );
-}
+});

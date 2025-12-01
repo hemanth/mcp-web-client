@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Wrench, AlertCircle } from 'lucide-react';
+import { useState, useRef, useEffect, memo, useCallback } from 'react';
+import { Send, Bot, User, Loader2, Wrench } from 'lucide-react';
 import type { MCPTool, ToolCallResult } from '@/lib/types';
 
 interface Message {
@@ -22,16 +22,16 @@ interface ChatPanelProps {
   serverName?: string;
 }
 
-export function ChatPanel({ tools, onCallTool, disabled, serverName }: ChatPanelProps) {
+export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, serverName }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
@@ -318,4 +318,4 @@ export function ChatPanel({ tools, onCallTool, disabled, serverName }: ChatPanel
       </div>
     </div>
   );
-}
+});
