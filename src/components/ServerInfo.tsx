@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { Server, Wrench, FileText, BookOpen, X, Info } from 'lucide-react';
+import { Server, Wrench, FileText, BookOpen, X } from 'lucide-react';
 import type { MCPServerInfo, MCPCapabilities } from '@/lib/types';
 
 interface ServerInfoProps {
@@ -73,13 +73,6 @@ export const ServerInfo = memo(function ServerInfo({
         </div>
       </div>
 
-      {/* Quick Stats */}
-      <div className="p-3 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border)]">
-        <div className="flex items-center gap-2 text-xs text-[var(--foreground-muted)]">
-          <Info className="w-3 h-3" />
-          <span>Protocol 2024-11-05</span>
-        </div>
-      </div>
     </div>
   );
 });
