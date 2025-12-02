@@ -152,7 +152,7 @@ export function useOAuth() {
   }, [clientRegistrations]);
 
   // Register client with server (dynamic registration)
-  const registerClient = useCallback(async (serverUrl: string): Promise<{ success: boolean; clientId?: string; clientSecret?: string; error?: string }> => {
+  const registerClient = useCallback(async (serverUrl: string): Promise<{ success: boolean; clientId?: string; clientSecret?: string; requiresDirectAuth?: boolean; authUrl?: string; error?: string }> => {
     try {
       const response = await fetch('/api/register', {
         method: 'POST',
@@ -166,8 +166,19 @@ export function useOAuth() {
         return { success: false, error: data.error };
       }
 
+      // Handle direct auth requirement (for HTTP Streamable endpoints)
+      if (data.requiresDirectAuth) {
+        return {
+          success: true,
+          requiresDirectAuth: true,
+          authUrl: data.authUrl,
+        };
+      }
+
       // Save registration to localStorage for persistence across server restarts
-      saveClientRegistration(serverUrl, data.clientId, data.clientSecret);
+      if (data.clientId) {
+        saveClientRegistration(serverUrl, data.clientId, data.clientSecret);
+      }
 
       return { success: true, clientId: data.clientId, clientSecret: data.clientSecret };
     } catch (error) {

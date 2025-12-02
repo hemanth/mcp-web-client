@@ -11,12 +11,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'serverUrl is required' }, { status: 400 });
     }
 
-    // Normalize server URL - remove /sse suffix if present
-    const baseUrl = serverUrl.replace(/\/sse$/, '');
+    // Normalize server URL - remove /sse or /mcp suffix if present
+    let baseUrl = serverUrl.replace(/\/(sse|mcp)\/?$/, '');
+
+    // For URLs ending in /mcp, try OAuth discovery at the domain root
+    const urlObj = new URL(serverUrl);
+    const isHttpStreamable = serverUrl.includes('/mcp');
+
+    console.log(`Register request - serverUrl: ${serverUrl}, baseUrl: ${baseUrl}, isHttpStreamable: ${isHttpStreamable}`);
+
     const callbackUri = redirectUri || `${request.nextUrl.origin}/auth/callback`;
 
-    // First try OAuth discovery
-    const metadata = await discoverOAuthMetadata(baseUrl);
+    // First try OAuth discovery at the base URL
+    let metadata = await discoverOAuthMetadata(baseUrl);
+    console.log(`OAuth discovery at ${baseUrl}: ${metadata ? 'found' : 'not found'}`);
+
+    // If not found and it's an HTTP Streamable endpoint, try the domain root
+    if (!metadata && isHttpStreamable) {
+      const domainRoot = `${urlObj.protocol}//${urlObj.host}`;
+      console.log(`OAuth discovery failed at ${baseUrl}, trying domain root: ${domainRoot}`);
+      metadata = await discoverOAuthMetadata(domainRoot);
+      if (metadata) {
+        baseUrl = domainRoot;
+      }
+    }
 
     if (metadata?.registration_endpoint) {
       // Use discovered registration endpoint
@@ -41,6 +59,19 @@ export async function POST(request: NextRequest) {
         clientId: registration.client_id,
         clientSecret: registration.client_secret,
         metadata,
+      });
+    }
+
+    // For HTTP Streamable endpoints without OAuth discovery,
+    // return info that OAuth redirect is needed
+    if (isHttpStreamable && !metadata) {
+      console.log(`HTTP Streamable endpoint ${serverUrl} requires OAuth - redirecting to server`);
+      // Return a special response indicating the user needs to authenticate directly
+      return NextResponse.json({
+        success: true,
+        requiresDirectAuth: true,
+        authUrl: serverUrl,
+        message: 'This server requires direct authentication. You will be redirected to authenticate.',
       });
     }
 

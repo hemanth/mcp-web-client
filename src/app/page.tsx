@@ -16,7 +16,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Server,
-  Layers,
   Loader2,
   Menu,
   X,
@@ -111,9 +110,12 @@ export default function Home() {
     connectServer,
     disconnectServer,
     removeServer,
+    editServer,
     callTool,
+    callToolOnServer,
     readResource,
     getPrompt,
+    getAllTools,
   } = useMultiServerMcp({
     onNotification: useCallback((serverId: string, method: string) => {
       toast.info(`Server notification: ${method}`);
@@ -235,9 +237,23 @@ export default function Home() {
   const isConnected = activeServer?.status === 'connected';
   const connectedServersCount = servers.filter(s => s.status === 'connected').length;
 
-  const currentTools = activeServer?.tools || [];
+  // Get tools from ALL connected servers for the chat
+  const allTools = getAllTools();
+  // Current server's resources and prompts (still per-server)
   const currentResources = activeServer?.resources || [];
   const currentPrompts = activeServer?.prompts || [];
+
+  // Handler to call tool on the correct server
+  const handleCallToolOnServer = useCallback(async (name: string, args: Record<string, unknown>, serverId?: string) => {
+    if (serverId) {
+      return await callToolOnServer(serverId, name, args);
+    }
+    // Fallback to active server if no serverId provided
+    return await callTool(name, args);
+  }, [callTool, callToolOnServer]);
+
+  // Tools for the active server (for the Tools panel)
+  const currentTools = activeServer?.tools || [];
 
   const navItems = [
     { id: 'chat' as const, label: 'Chat', icon: MessageSquare, count: null },
@@ -341,14 +357,6 @@ export default function Home() {
 
         {/* Server List */}
         <div className="p-3 border-b border-[var(--border)] flex-shrink-0">
-          {!sidebarCollapsed && connectedServersCount > 0 && (
-            <div className="flex items-center gap-2 px-3 py-2 mb-3 rounded-lg bg-green-500/10 border border-green-500/20">
-              <Layers className="w-4 h-4 text-green-400" />
-              <span className="text-xs font-medium text-green-400">
-                {connectedServersCount} server{connectedServersCount !== 1 ? 's' : ''} connected
-              </span>
-            </div>
-          )}
           <ServerList
             servers={servers}
             activeServerId={activeServerId}
@@ -360,6 +368,7 @@ export default function Home() {
             onConnectServer={handleConnectServer}
             onDisconnectServer={disconnectServer}
             onRemoveServer={removeServer}
+            onEditServer={editServer}
             onStartOAuth={handleStartOAuth}
             onRegisterClient={handleRegisterClient}
             collapsed={sidebarCollapsed}
@@ -413,7 +422,8 @@ export default function Home() {
         <header className="hidden md:flex h-14 items-center justify-between px-6 border-b border-[var(--border)] bg-[var(--background-secondary)]">
           <div className="flex items-center gap-4">
             <h2 className="font-semibold capitalize">{activePanel}</h2>
-            {isConnected && activeServer && (
+            {/* Show active server for non-chat panels */}
+            {activePanel !== 'chat' && isConnected && activeServer && (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--background-tertiary)] text-xs text-[var(--foreground-muted)]">
                 <Server className="w-3 h-3" />
                 {activeServer.serverInfo?.name || activeServer.name}
@@ -421,14 +431,6 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-4">
-            {connectedServersCount > 1 && (
-              <span className="text-xs text-[var(--foreground-muted)] bg-[var(--background-tertiary)] px-2 py-1 rounded">
-                {connectedServersCount} servers
-              </span>
-            )}
-            <span className="text-xs text-[var(--foreground-muted)]">
-              Protocol: 2024-11-05
-            </span>
             <a
               href="https://github.com/hemanth/mcp-web-client"
               target="_blank"
@@ -483,10 +485,12 @@ export default function Home() {
                 <Suspense fallback={<PanelLoader />}>
                   {activePanel === 'chat' && (
                     <ChatPanel
-                      tools={currentTools}
-                      onCallTool={callTool}
-                      disabled={!isConnected}
-                      serverName={activeServer?.serverInfo?.name || activeServer?.name}
+                      tools={allTools}
+                      onCallTool={handleCallToolOnServer}
+                      disabled={connectedServersCount === 0}
+                      connectedServers={servers
+                        .filter(s => s.status === 'connected')
+                        .map(s => ({ id: s.id, name: s.serverInfo?.name || s.name }))}
                     />
                   )}
 
@@ -518,27 +522,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* Server Info Sidebar - Desktop only */}
-          {isConnected && activeServer && (
-            <div className="hidden md:block w-72 p-4 border-l border-[var(--border)] overflow-y-auto bg-[var(--background-secondary)] contain-layout">
-              <ServerInfo
-                serverInfo={activeServer.serverInfo}
-                capabilities={activeServer.capabilities}
-                toolsCount={currentTools.length}
-                resourcesCount={currentResources.length}
-                promptsCount={currentPrompts.length}
-              />
-
-              <div className="mt-4 pt-4 border-t border-[var(--border)]">
-                <button
-                  onClick={handleDisconnect}
-                  className="w-full px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium"
-                >
-                  Disconnect
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Mobile Bottom Navigation */}
