@@ -19,6 +19,7 @@ import {
   Search,
   Lock,
   ExternalLink,
+  Pencil,
 } from 'lucide-react';
 import type { ServerInstance, OAuthCredentials } from '@/lib/types';
 import { featuredServers, categoryLabels, type FeaturedServer } from '@/lib/featuredServers';
@@ -34,8 +35,9 @@ interface ServerListProps {
   onConnectServer: (serverId: string, credentials?: OAuthCredentials) => Promise<void>;
   onDisconnectServer: (serverId: string) => void;
   onRemoveServer: (serverId: string) => void;
+  onEditServer: (serverId: string, url: string, name?: string) => void;
   onStartOAuth: (serverUrl: string, serverId?: string) => Promise<{ success: boolean; error?: string }>;
-  onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string }>;
+  onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
   collapsed?: boolean;
 }
 
@@ -43,7 +45,7 @@ interface AddServerModalProps {
   onAdd: (url: string, name: string, authType: AuthType, bearerToken?: string) => void;
   onAddServer: (url: string, name?: string) => Promise<string>;
   onStartOAuth: (serverUrl: string, serverId?: string) => Promise<{ success: boolean; error?: string }>;
-  onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string }>;
+  onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
   onClose: () => void;
   isLoading: boolean;
 }
@@ -95,6 +97,27 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
         if (!regResult.success) {
           setOauthStatus('error');
           setOauthError(regResult.error || 'Failed to register client');
+          return;
+        }
+
+        // Handle direct auth requirement (for HTTP Streamable endpoints like /mcp)
+        if (regResult.requiresDirectAuth && regResult.authUrl) {
+          setOauthStatus('authorizing');
+          // Open the auth URL in a popup - the server will handle OAuth
+          const width = 600;
+          const height = 700;
+          const left = window.screenX + (window.outerWidth - width) / 2;
+          const top = window.screenY + (window.outerHeight - height) / 2;
+
+          window.open(
+            regResult.authUrl,
+            'mcp-oauth',
+            `width=${width},height=${height},left=${left},top=${top},popup=yes`
+          );
+
+          // Add the server without credentials - user will authenticate in popup
+          await onAddServer(url.trim(), name.trim() || undefined);
+          onClose();
           return;
         }
 
@@ -376,6 +399,251 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
   return createPortal(modalContent, document.body);
 }
 
+interface EditServerModalProps {
+  server: ServerInstance;
+  onSave: (url: string, name: string, authType: AuthType, bearerToken?: string) => void;
+  onStartOAuth: (serverUrl: string) => Promise<{ success: boolean; error?: string }>;
+  onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
+  onClose: () => void;
+}
+
+export function EditServerModal({ server, onSave, onStartOAuth, onRegisterClient, onClose }: EditServerModalProps) {
+  const [url, setUrl] = useState(server.url);
+  const [name, setName] = useState(server.name);
+  const [mounted, setMounted] = useState(false);
+
+  // Determine initial auth type from existing credentials
+  const getInitialAuthType = (): AuthType => {
+    if (!server.credentials) return 'none';
+    // If there's a refresh token, it's likely OAuth
+    if (server.credentials.refreshToken) return 'oauth';
+    // Otherwise it's bearer token
+    return 'bearer';
+  };
+
+  const [authType, setAuthType] = useState<AuthType>(getInitialAuthType());
+  const [bearerToken, setBearerToken] = useState(
+    authType === 'bearer' ? server.credentials?.accessToken || '' : ''
+  );
+  const [oauthStatus, setOauthStatus] = useState<'idle' | 'registering' | 'authorizing' | 'error'>('idle');
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  const isProcessing = oauthStatus === 'registering' || oauthStatus === 'authorizing';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+
+    if (authType === 'oauth') {
+      setOauthStatus('registering');
+      setOauthError(null);
+
+      try {
+        const regResult = await onRegisterClient(url.trim());
+        if (!regResult.success) {
+          setOauthStatus('error');
+          setOauthError(regResult.error || 'Failed to register client');
+          return;
+        }
+
+        // Handle direct auth requirement
+        if (regResult.requiresDirectAuth && regResult.authUrl) {
+          setOauthStatus('authorizing');
+          const width = 600;
+          const height = 700;
+          const left = window.screenX + (window.outerWidth - width) / 2;
+          const top = window.screenY + (window.outerHeight - height) / 2;
+
+          window.open(
+            regResult.authUrl,
+            'mcp-oauth',
+            `width=${width},height=${height},left=${left},top=${top},popup=yes`
+          );
+
+          onSave(url.trim(), name.trim(), 'none');
+          onClose();
+          return;
+        }
+
+        setOauthStatus('authorizing');
+        const authResult = await onStartOAuth(url.trim());
+        if (!authResult.success) {
+          setOauthStatus('error');
+          setOauthError(authResult.error || 'Failed to start OAuth');
+          return;
+        }
+
+        onClose();
+      } catch (error) {
+        setOauthStatus('error');
+        setOauthError(error instanceof Error ? error.message : 'OAuth failed');
+      }
+    } else {
+      onSave(url.trim(), name.trim(), authType, authType === 'bearer' ? bearerToken : undefined);
+      onClose();
+    }
+  };
+
+  const authOptions = [
+    { value: 'none' as AuthType, label: 'None', icon: Globe },
+    { value: 'bearer' as AuthType, label: 'Token', icon: Key },
+    { value: 'oauth' as AuthType, label: 'OAuth', icon: Shield },
+  ];
+
+  const modalContent = (
+    <div
+      className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4"
+      onClick={(e) => e.target === e.currentTarget && !isProcessing && onClose()}
+    >
+      <div className="bg-[var(--background-secondary)] border border-[var(--border)] rounded-2xl w-full max-w-md shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
+          <h3 className="text-base font-semibold">Edit Server</h3>
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="p-1 hover:bg-[var(--background-tertiary)] rounded-lg transition-colors disabled:opacity-50"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-4 space-y-3">
+          {/* Server URL */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Server URL</label>
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://mcp.example.com/sse"
+              className="w-full px-3 py-2 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] placeholder:text-[var(--foreground-muted)]"
+              autoFocus
+              required
+              disabled={isProcessing}
+            />
+          </div>
+
+          {/* Display Name */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Name <span className="text-[var(--foreground-muted)] font-normal text-xs">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My MCP Server"
+              className="w-full px-3 py-2 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] placeholder:text-[var(--foreground-muted)]"
+              disabled={isProcessing}
+            />
+          </div>
+
+          {/* Auth Type */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Auth</label>
+            <div className="flex gap-1.5 p-1 bg-[var(--background-tertiary)] rounded-lg">
+              {authOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setAuthType(option.value)}
+                  disabled={isProcessing}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all ${
+                    authType === option.value
+                      ? 'bg-[var(--accent)] text-white'
+                      : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)]'
+                  } disabled:opacity-50`}
+                >
+                  <option.icon className="w-3.5 h-3.5" />
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Bearer Token Input */}
+          {authType === 'bearer' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Token</label>
+              <input
+                type="password"
+                value={bearerToken}
+                onChange={(e) => setBearerToken(e.target.value)}
+                placeholder="Enter access token"
+                className="w-full px-3 py-2 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)] placeholder:text-[var(--foreground-muted)] font-mono"
+                required
+                disabled={isProcessing}
+              />
+            </div>
+          )}
+
+          {/* OAuth Status */}
+          {authType === 'oauth' && oauthStatus !== 'idle' && (
+            <div className={`p-2.5 rounded-lg border flex items-center gap-2 ${
+              oauthStatus === 'error'
+                ? 'bg-red-500/10 border-red-500/20'
+                : 'bg-[var(--accent)]/10 border-[var(--accent)]/20'
+            }`}>
+              {(oauthStatus === 'registering' || oauthStatus === 'authorizing') && (
+                <Loader2 className="w-4 h-4 text-[var(--accent)] animate-spin flex-shrink-0" />
+              )}
+              {oauthStatus === 'error' && (
+                <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+              )}
+              <p className={`text-xs ${oauthStatus === 'error' ? 'text-red-400' : 'text-[var(--accent)]'}`}>
+                {oauthStatus === 'registering' && 'Registering...'}
+                {oauthStatus === 'authorizing' && 'Opening auth...'}
+                {oauthStatus === 'error' && (oauthError || 'Failed')}
+              </p>
+            </div>
+          )}
+
+          {/* Current auth info */}
+          {server.credentials && authType === getInitialAuthType() && (
+            <div className="p-2.5 rounded-lg border bg-green-500/10 border-green-500/20 flex items-center gap-2">
+              <Check className="w-4 h-4 text-green-400 flex-shrink-0" />
+              <p className="text-xs text-green-400">
+                Currently authenticated
+              </p>
+            </div>
+          )}
+        </form>
+
+        {/* Footer */}
+        <div className="flex gap-2 p-4 pt-0">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isProcessing}
+            className="flex-1 px-3 py-2 bg-[var(--background-tertiary)] hover:bg-[var(--border)] rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            onClick={handleSubmit}
+            disabled={isProcessing || !url.trim() || (authType === 'bearer' && !bearerToken.trim())}
+            className="flex-1 px-3 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          >
+            {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            {authType === 'oauth' ? 'Auth & Save' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!mounted) return null;
+  return createPortal(modalContent, document.body);
+}
+
 interface ServerItemProps {
   server: ServerInstance;
   isActive: boolean;
@@ -383,6 +651,7 @@ interface ServerItemProps {
   onConnect: () => void;
   onDisconnect: () => void;
   onRemove: () => void;
+  onEdit: () => void;
   collapsed?: boolean;
 }
 
@@ -393,6 +662,7 @@ function ServerItem({
   onConnect,
   onDisconnect,
   onRemove,
+  onEdit,
   collapsed,
 }: ServerItemProps) {
   const [showActions, setShowActions] = useState(false);
@@ -507,6 +777,16 @@ function ServerItem({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              onEdit();
+            }}
+            className="p-1.5 hover:bg-[var(--accent)]/20 rounded text-[var(--foreground-muted)] hover:text-[var(--accent)]"
+            title="Edit"
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
               onRemove();
             }}
             className="p-1.5 hover:bg-red-500/20 rounded text-[var(--foreground-muted)] hover:text-red-400"
@@ -538,12 +818,14 @@ export function ServerList({
   onConnectServer,
   onDisconnectServer,
   onRemoveServer,
+  onEditServer,
   onStartOAuth,
   onRegisterClient,
   collapsed,
 }: ServerListProps) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [editingServer, setEditingServer] = useState<ServerInstance | null>(null);
 
   const handleAddServer = async (url: string, name: string, authType: AuthType, bearerToken?: string) => {
     setIsAdding(true);
@@ -571,6 +853,37 @@ export function ServerList({
     }
   };
 
+  const handleEditSave = async (url: string, name: string, authType: AuthType, bearerToken?: string) => {
+    if (editingServer) {
+      let credentials: OAuthCredentials | undefined;
+
+      if (authType === 'bearer' && bearerToken) {
+        credentials = {
+          accessToken: bearerToken,
+          tokenType: 'Bearer',
+        };
+      } else if (authType === 'none') {
+        credentials = undefined;
+      }
+
+      onEditServer(editingServer.id, url, name || undefined);
+
+      // If credentials changed, reconnect with new credentials
+      if (credentials !== undefined || authType === 'none') {
+        // Disconnect first if connected
+        if (editingServer.status === 'connected') {
+          onDisconnectServer(editingServer.id);
+        }
+        // Reconnect with new credentials if not OAuth (OAuth handles its own flow)
+        if (authType !== 'oauth') {
+          await onConnectServer(editingServer.id, credentials);
+        }
+      }
+
+      setEditingServer(null);
+    }
+  };
+
   if (collapsed) {
     return (
       <div className="space-y-2">
@@ -583,6 +896,7 @@ export function ServerList({
             onConnect={() => onConnectServer(server.id)}
             onDisconnect={() => onDisconnectServer(server.id)}
             onRemove={() => onRemoveServer(server.id)}
+            onEdit={() => setEditingServer(server)}
             collapsed
           />
         ))}
@@ -602,6 +916,16 @@ export function ServerList({
             onRegisterClient={onRegisterClient}
             onClose={() => setShowAddModal(false)}
             isLoading={isAdding}
+          />
+        )}
+
+        {editingServer && (
+          <EditServerModal
+            server={editingServer}
+            onSave={handleEditSave}
+            onStartOAuth={onStartOAuth}
+            onRegisterClient={onRegisterClient}
+            onClose={() => setEditingServer(null)}
           />
         )}
       </div>
@@ -647,6 +971,7 @@ export function ServerList({
                 onConnect={() => onConnectServer(server.id)}
                 onDisconnect={() => onDisconnectServer(server.id)}
                 onRemove={() => onRemoveServer(server.id)}
+                onEdit={() => setEditingServer(server)}
               />
             ))}
           </div>
@@ -661,6 +986,16 @@ export function ServerList({
           onRegisterClient={onRegisterClient}
           onClose={() => setShowAddModal(false)}
           isLoading={isAdding}
+        />
+      )}
+
+      {editingServer && (
+        <EditServerModal
+          server={editingServer}
+          onSave={handleEditSave}
+          onStartOAuth={onStartOAuth}
+          onRegisterClient={onRegisterClient}
+          onClose={() => setEditingServer(null)}
         />
       )}
     </div>
