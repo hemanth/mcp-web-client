@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, memo } from 'react';
-import { FileText, Eye, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check } from 'lucide-react';
-import type { MCPResource } from '@/lib/types';
+import { useState, memo, useMemo, useRef } from 'react';
+import { FileText, Eye, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check, Image, Code, FileCode, Globe, Download } from 'lucide-react';
+import type { MCPResource, ResourceContentItem, ResourceReadResult } from '@/lib/types';
 
 interface ResourcesPanelProps {
   resources: MCPResource[];
@@ -16,12 +16,214 @@ interface ResourceCardProps {
   disabled?: boolean;
 }
 
+// Helper to determine content type category
+function getContentCategory(mimeType?: string): 'image' | 'html' | 'json' | 'code' | 'text' {
+  if (!mimeType) return 'text';
+  if (mimeType.startsWith('image/')) return 'image';
+  // Handle HTML including MCP UI HTML (text/html+mcp)
+  if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml' || mimeType.includes('html')) return 'html';
+  if (mimeType === 'application/json' || mimeType.endsWith('+json')) return 'json';
+  if (mimeType.startsWith('text/') && ['javascript', 'css', 'xml', 'markdown'].some(t => mimeType.includes(t))) return 'code';
+  return 'text';
+}
+
+// Helper to get icon for content type
+function getContentIcon(mimeType?: string) {
+  const category = getContentCategory(mimeType);
+  switch (category) {
+    case 'image': return Image;
+    case 'html': return Globe;
+    case 'json': return FileCode;
+    case 'code': return Code;
+    default: return FileText;
+  }
+}
+
+// Component to render a single content item
+function ContentRenderer({ item, resourceName }: { item: ResourceContentItem; resourceName: string }) {
+  const [copied, setCopied] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+  const [iframeHeight, setIframeHeight] = useState(400);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const category = getContentCategory(item.mimeType);
+
+  // Auto-resize iframe to fit content
+  const handleIframeLoad = () => {
+    try {
+      const iframe = iframeRef.current;
+      if (iframe?.contentWindow?.document?.body) {
+        const height = iframe.contentWindow.document.body.scrollHeight;
+        setIframeHeight(Math.min(Math.max(height + 20, 200), 800));
+      }
+    } catch {
+      // Cross-origin restriction, use default height
+    }
+  };
+
+  const copyContent = () => {
+    const textToCopy = item.text || item.blob || '';
+    navigator.clipboard.writeText(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadBlob = () => {
+    if (!item.blob) return;
+    const link = document.createElement('a');
+    link.href = `data:${item.mimeType || 'application/octet-stream'};base64,${item.blob}`;
+    link.download = resourceName || 'download';
+    link.click();
+  };
+
+  // Render image content
+  if (category === 'image' && item.blob) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-[var(--foreground-muted)]">{item.mimeType}</span>
+          <button
+            onClick={downloadBlob}
+            className="flex items-center gap-1 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+          >
+            <Download className="w-3 h-3" />
+            Download
+          </button>
+        </div>
+        <div className="rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--background-tertiary)] p-2">
+          <img
+            src={`data:${item.mimeType};base64,${item.blob}`}
+            alt={resourceName}
+            className="max-w-full h-auto rounded"
+            style={{ maxHeight: '400px', objectFit: 'contain' }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Render HTML content
+  if (category === 'html' && item.text) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-[var(--foreground-muted)]">{item.mimeType || 'text/html'}</span>
+            <button
+              onClick={() => setShowRaw(!showRaw)}
+              className="px-2 py-0.5 text-xs bg-[var(--background-tertiary)] hover:bg-[var(--border)] rounded transition-colors"
+            >
+              {showRaw ? 'Preview' : 'Raw'}
+            </button>
+          </div>
+          <button
+            onClick={copyContent}
+            className="flex items-center gap-1 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+          >
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        {showRaw ? (
+          <pre className="p-3 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm overflow-auto max-h-96 font-mono text-xs">
+            {item.text}
+          </pre>
+        ) : (
+          <div className="rounded-lg overflow-hidden border border-[var(--border)] bg-white">
+            <iframe
+              ref={iframeRef}
+              srcDoc={item.text}
+              title={resourceName}
+              className="w-full"
+              sandbox="allow-same-origin allow-scripts"
+              style={{ border: 'none', height: `${iframeHeight}px` }}
+              onLoad={handleIframeLoad}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Render JSON content with syntax highlighting
+  if (category === 'json' && item.text) {
+    let formattedJson = item.text;
+    try {
+      const parsed = JSON.parse(item.text);
+      formattedJson = JSON.stringify(parsed, null, 2);
+    } catch {
+      // Keep original if not valid JSON
+    }
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-[var(--foreground-muted)]">{item.mimeType || 'application/json'}</span>
+          <button
+            onClick={copyContent}
+            className="flex items-center gap-1 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+          >
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <pre className="p-3 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm overflow-auto max-h-96 font-mono text-xs text-green-400">
+          {formattedJson}
+        </pre>
+      </div>
+    );
+  }
+
+  // Render code content
+  if (category === 'code' && item.text) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-[var(--foreground-muted)]">{item.mimeType}</span>
+          <button
+            onClick={copyContent}
+            className="flex items-center gap-1 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+          >
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <pre className="p-3 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm overflow-auto max-h-96 font-mono text-xs text-blue-400">
+          {item.text}
+        </pre>
+      </div>
+    );
+  }
+
+  // Default text rendering
+  const textContent = item.text || (item.blob ? atob(item.blob) : '');
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-[var(--foreground-muted)]">{item.mimeType || 'text/plain'}</span>
+        <button
+          onClick={copyContent}
+          className="flex items-center gap-1 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+        >
+          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre className="p-3 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm overflow-auto max-h-96 font-mono text-xs whitespace-pre-wrap">
+        {textContent}
+      </pre>
+    </div>
+  );
+}
+
 const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: ResourceCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [content, setContent] = useState<string | null>(null);
+  const [contents, setContents] = useState<ResourceContentItem[] | null>(null);
+  const [rawResult, setRawResult] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+
+  const Icon = useMemo(() => getContentIcon(resource.mimeType), [resource.mimeType]);
 
   const handleRead = async () => {
     setIsLoading(true);
@@ -29,19 +231,28 @@ const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: 
 
     try {
       const result = await onRead();
-      setContent(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+      setRawResult(result);
+
+      // Parse the result - MCP returns { contents: [...] }
+      if (result && typeof result === 'object' && 'contents' in result) {
+        const readResult = result as ResourceReadResult;
+        setContents(readResult.contents);
+      } else if (Array.isArray(result)) {
+        // Some servers return array directly
+        setContents(result as ResourceContentItem[]);
+      } else {
+        // Fallback: wrap in a text content item
+        setContents([{
+          type: 'text',
+          uri: resource.uri,
+          text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+          mimeType: resource.mimeType || 'text/plain',
+        }]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read resource');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const copyContent = () => {
-    if (content) {
-      navigator.clipboard.writeText(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -54,7 +265,7 @@ const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: 
       >
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-            <FileText className="w-4 h-4 text-blue-400" />
+            <Icon className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-left">
             <span className="font-medium text-sm">{resource.name}</span>
@@ -102,7 +313,7 @@ const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: 
             ) : (
               <>
                 <Eye className="w-4 h-4" />
-                Read Resource
+                {contents ? 'Refresh' : 'Read Resource'}
               </>
             )}
           </button>
@@ -116,21 +327,18 @@ const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: 
           )}
 
           {/* Content display */}
-          {content && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-xs font-medium text-[var(--foreground-muted)] uppercase tracking-wide">Content</h4>
-                <button
-                  onClick={copyContent}
-                  className="flex items-center gap-1 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
-                >
-                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <pre className="p-3 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-lg text-sm overflow-auto max-h-96 font-mono text-xs">
-                {content}
-              </pre>
+          {contents && contents.length > 0 && (
+            <div className="space-y-4">
+              <h4 className="text-xs font-medium text-[var(--foreground-muted)] uppercase tracking-wide">
+                Content {contents.length > 1 && `(${contents.length} items)`}
+              </h4>
+              {contents.map((item, index) => (
+                <ContentRenderer
+                  key={`${item.uri}-${index}`}
+                  item={item}
+                  resourceName={resource.name}
+                />
+              ))}
             </div>
           )}
         </div>
