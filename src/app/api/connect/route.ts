@@ -12,8 +12,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'serverUrl is required' }, { status: 400 });
     }
 
-    // Normalize server URL - remove /sse suffix if present
-    const baseUrl = serverUrl.replace(/\/sse$/, '');
+    // Normalize server URL - remove /sse or /mcp suffix if present
+    const baseUrl = serverUrl.replace(/\/(sse|mcp)\/?$/, '');
 
     // Get client registration (from dynamic registration or provided)
     let effectiveClientId = clientId;
