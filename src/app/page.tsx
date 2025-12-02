@@ -117,16 +117,6 @@ export default function Home() {
     getPrompt,
     getAllTools,
   } = useMultiServerMcp({
-    onNotification: useCallback((serverId: string, method: string) => {
-      toast.info(`Server notification: ${method}`);
-    }, []),
-    onServerChange: useCallback((serverId: string, status: string) => {
-      if (status === 'connected') {
-        toast.success('Connected to server');
-      } else if (status === 'error') {
-        toast.error('Error connecting to server');
-      }
-    }, []),
     onError: useCallback((serverId: string, error: Error) => {
       toast.error(error.message);
     }, []),
