@@ -18,6 +18,24 @@ import type {
   TransportType,
 } from './types';
 
+// Helper to normalize resource - some servers swap name/uri
+function normalizeResource(resource: MCPResource): MCPResource {
+  // Check if name looks like a URI and uri doesn't
+  const nameIsUri = resource.name.includes('://') || resource.name.startsWith('/');
+  const uriIsUri = resource.uri.includes('://') || resource.uri.startsWith('/');
+
+  if (nameIsUri && !uriIsUri) {
+    // Swap name and uri for display purposes
+    // Note: reading may fail if server registered with wrong argument order
+    return {
+      ...resource,
+      uri: resource.name,
+      name: resource.uri,
+    };
+  }
+  return resource;
+}
+
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const STORAGE_KEY = 'mcp-servers';
 
@@ -56,10 +74,11 @@ interface StoredServer {
   url: string;
   name: string;
   credentials?: OAuthCredentials;
+  wasConnected?: boolean; // Track if server was connected before page refresh
 }
 
 // Load servers from localStorage
-function loadStoredServers(): ServerInstance[] {
+function loadStoredServers(): (ServerInstance & { wasConnected?: boolean })[] {
   if (typeof window === 'undefined') return [];
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -71,6 +90,7 @@ function loadStoredServers(): ServerInstance[] {
       tools: [],
       resources: [],
       prompts: [],
+      wasConnected: s.wasConnected,
     }));
   } catch {
     return [];
@@ -86,6 +106,7 @@ function saveServers(servers: ServerInstance[]) {
       url: s.url,
       name: s.name,
       credentials: s.credentials,
+      wasConnected: s.status === 'connected', // Remember connection state
     }));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
   } catch {
@@ -99,11 +120,19 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
   const [isInitialized, setIsInitialized] = useState(false);
 
   const connectionsRef = useRef<Map<string, ServerConnection>>(new Map());
+  const autoConnectAttemptedRef = useRef<Set<string>>(new Set());
+  const serversToAutoConnectRef = useRef<Set<string>>(new Set()); // Track servers that should auto-connect
 
   // Load servers from localStorage on mount
   useEffect(() => {
     const stored = loadStoredServers();
     if (stored.length > 0) {
+      // Track which servers were previously connected for auto-reconnect
+      for (const s of stored) {
+        if (s.wasConnected) {
+          serversToAutoConnectRef.current.add(s.id);
+        }
+      }
       setServers(stored);
       setActiveServerId(stored[0].id);
     }
@@ -604,7 +633,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         if (type === 'tools') {
           tools = (result as { tools: MCPTool[] }).tools || [];
         } else if (type === 'resources') {
-          resources = (result as { resources: MCPResource[] }).resources || [];
+          const rawResources = (result as { resources: MCPResource[] }).resources || [];
+          resources = rawResources.map(normalizeResource);
         } else if (type === 'prompts') {
           prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
         }
@@ -678,6 +708,30 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     }
   }, [activeServerId, disconnectServer]);
 
+  // Edit a server's URL and name
+  const editServer = useCallback((serverId: string, url: string, name?: string) => {
+    const server = servers.find(s => s.id === serverId);
+    if (!server) return;
+
+    // If server is connected and URL changed, disconnect first
+    if (server.status === 'connected' && server.url !== url) {
+      disconnectServer(serverId);
+    }
+
+    let serverName = name;
+    if (!serverName) {
+      try {
+        serverName = new URL(url).hostname;
+      } catch {
+        serverName = url;
+      }
+    }
+
+    setServers(prev => prev.map(s =>
+      s.id === serverId ? { ...s, url, name: serverName! } : s
+    ));
+  }, [servers, disconnectServer]);
+
   // Call a tool on the active server
   const callTool = useCallback(async (name: string, args: Record<string, unknown> = {}): Promise<ToolCallResult> => {
     if (!activeServerId) {
@@ -737,6 +791,36 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       .flatMap(s => s.prompts.map(p => ({ ...p, serverId: s.id, serverName: s.name })));
   }, [servers]);
 
+  // Auto-connect servers that were previously connected on page load
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    // Small delay to ensure the component is fully mounted
+    const timer = setTimeout(() => {
+      for (const server of servers) {
+        // Only auto-connect if:
+        // 1. Server was previously connected OR has credentials
+        // 2. Server is not already connected/connecting
+        // 3. We haven't already attempted auto-connect for this server
+        const shouldAutoConnect = serversToAutoConnectRef.current.has(server.id) || server.credentials;
+
+        if (
+          shouldAutoConnect &&
+          server.status === 'disconnected' &&
+          !autoConnectAttemptedRef.current.has(server.id)
+        ) {
+          autoConnectAttemptedRef.current.add(server.id);
+          connectServer(server.id, server.credentials).catch(() => {
+            // Silently ignore auto-connect failures
+            // User can manually reconnect if needed
+          });
+        }
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [isInitialized, servers, connectServer]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -758,6 +842,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     connectServer,
     disconnectServer,
     removeServer,
+    editServer,
     callTool,
     callToolOnServer,
     readResource,

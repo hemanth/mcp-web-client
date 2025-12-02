@@ -137,6 +137,19 @@ export interface ToolCallResult {
   isError?: boolean;
 }
 
+// Resource Content Types
+export interface ResourceContentItem {
+  type: 'text' | 'blob';
+  uri: string;
+  text?: string;
+  blob?: string; // base64 encoded
+  mimeType?: string;
+}
+
+export interface ResourceReadResult {
+  contents: ResourceContentItem[];
+}
+
 // Transport Types
 
 export type TransportType = 'sse' | 'streamable-http';
