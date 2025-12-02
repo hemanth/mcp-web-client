@@ -20,6 +20,7 @@ import {
   Loader2,
   Menu,
   X,
+  Github,
 } from 'lucide-react';
 
 // Dynamic imports for code splitting - panels are lazy loaded
@@ -267,12 +268,23 @@ export default function Home() {
           </div>
           <span className="font-semibold">MCP Client</span>
         </div>
-        <button
-          onClick={() => setMobileMenuOpen(true)}
-          className="p-2 hover:bg-[var(--background-tertiary)] rounded-lg"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <a
+            href="https://github.com/hemanth/mcp-web-client"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--foreground-muted)]"
+            title="View on GitHub"
+          >
+            <Github className="w-5 h-5" />
+          </a>
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-2 hover:bg-[var(--background-tertiary)] rounded-lg"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
       {/* Mobile Drawer Overlay */}
@@ -417,6 +429,15 @@ export default function Home() {
             <span className="text-xs text-[var(--foreground-muted)]">
               Protocol: 2024-11-05
             </span>
+            <a
+              href="https://github.com/hemanth/mcp-web-client"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+              title="View on GitHub"
+            >
+              <Github className="w-5 h-5" />
+            </a>
           </div>
         </header>
 
