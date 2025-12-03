@@ -1,6 +1,7 @@
 # MCP Web Client
+> A web-based client for the Model Context Protocol (MCP). Connect to multiple MCP servers, browse tools/resources/prompts, and interact via chat.
 
-A web-based client for the Model Context Protocol (MCP). Connect to multiple MCP servers, browse tools/resources/prompts, and interact via chat.
+https://github.com/user-attachments/assets/29057bb1-d856-4a7c-bfe3-97020da21782
 
 ## Features
 
