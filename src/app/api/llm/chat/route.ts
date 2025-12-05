@@ -82,6 +82,11 @@ function convertMessagesForAnthropic(messages: ChatMessage[], systemPrompt?: str
   for (const msg of messages) {
     if (msg.role === 'system') continue; // System handled separately
 
+    // Skip messages with empty content (except tool messages and messages with tool calls)
+    if (!msg.content && msg.role !== 'tool' && (!msg.toolCalls || msg.toolCalls.length === 0)) {
+      continue;
+    }
+
     if (msg.role === 'tool') {
       // Anthropic expects tool results in user messages
       result.push({
