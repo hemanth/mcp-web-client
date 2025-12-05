@@ -260,13 +260,13 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
       const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
       setError(errorMessage);
 
-      // Add error message
+      // Add error message with actual content so it doesn't cause API errors on retry
       setMessages(prev => [
         ...prev,
         {
           id: uuidv4(),
           role: 'assistant',
-          content: '',
+          content: `Error: ${errorMessage}`,
           timestamp: Date.now(),
           error: errorMessage,
         },
