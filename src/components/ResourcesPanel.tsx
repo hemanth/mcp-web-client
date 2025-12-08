@@ -1,8 +1,13 @@
 'use client';
 
-import { useState, memo, useMemo, useRef } from 'react';
+import { useState, memo, useMemo, useRef, useEffect, useCallback } from 'react';
 import { FileText, Eye, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check, Image, Code, FileCode, Globe, Download } from 'lucide-react';
 import type { MCPResource, ResourceContentItem, ResourceReadResult } from '@/lib/types';
+
+// SEP-1865: Check if content is an MCP App
+function isMcpApp(mimeType?: string): boolean {
+  return mimeType === 'text/html;profile=mcp-app' || mimeType?.includes('mcp-app') || false;
+}
 
 interface ResourcesPanelProps {
   resources: MCPResource[];
@@ -20,8 +25,8 @@ interface ResourceCardProps {
 function getContentCategory(mimeType?: string): 'image' | 'html' | 'json' | 'code' | 'text' {
   if (!mimeType) return 'text';
   if (mimeType.startsWith('image/')) return 'image';
-  // Handle HTML including MCP UI HTML (text/html+mcp)
-  if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml' || mimeType.includes('html')) return 'html';
+  // Handle HTML including MCP UI HTML (text/html+mcp, text/html;profile=mcp-app)
+  if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml' || mimeType.includes('html') || mimeType.includes('mcp-app')) return 'html';
   if (mimeType === 'application/json' || mimeType.endsWith('+json')) return 'json';
   if (mimeType.startsWith('text/') && ['javascript', 'css', 'xml', 'markdown'].some(t => mimeType.includes(t))) return 'code';
   return 'text';
@@ -47,6 +52,87 @@ function ContentRenderer({ item, resourceName }: { item: ResourceContentItem; re
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const category = getContentCategory(item.mimeType);
+  const isApp = isMcpApp(item.mimeType);
+
+  // SEP-1865: Handle postMessage communication from MCP App iframe
+  const handleMessage = useCallback((event: MessageEvent) => {
+    // Validate message is from our iframe
+    if (!iframeRef.current?.contentWindow || event.source !== iframeRef.current.contentWindow) {
+      return;
+    }
+
+    const message = event.data;
+    if (!message || typeof message !== 'object' || message.jsonrpc !== '2.0') {
+      return;
+    }
+
+    console.log('[MCP App Host] Received message:', message);
+
+    // Handle ui/initialize request per SEP-1865
+    if (message.method === 'ui/initialize' && message.id) {
+      const response = {
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          protocolVersion: '2024-11-05',
+          hostContext: {
+            theme: 'dark',
+            displayMode: 'inline',
+            platform: 'web',
+            userAgent: 'MCP Web Client/1.0.0',
+          },
+        },
+      };
+      iframeRef.current.contentWindow.postMessage(response, '*');
+      console.log('[MCP App Host] Sent ui/initialize response');
+      return;
+    }
+
+    // Handle ui/open-link request per SEP-1865
+    if (message.method === 'ui/open-link' && message.id) {
+      const url = message.params?.url;
+      if (url && typeof url === 'string') {
+        try {
+          window.open(url, '_blank', 'noopener,noreferrer');
+          iframeRef.current.contentWindow.postMessage({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {},
+          }, '*');
+        } catch {
+          iframeRef.current.contentWindow.postMessage({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: { code: -32000, message: 'Failed to open link' },
+          }, '*');
+        }
+      }
+      return;
+    }
+
+    // Handle ui/notifications/size-changed per SEP-1865
+    if (message.method === 'ui/notifications/size-changed') {
+      const height = message.params?.height;
+      if (typeof height === 'number' && height > 0) {
+        setIframeHeight(Math.min(Math.max(height, 200), 800));
+      }
+      return;
+    }
+
+    // Handle notifications/message (logging) per SEP-1865
+    if (message.method === 'notifications/message') {
+      console.log('[MCP App]', message.params?.message || message.params);
+      return;
+    }
+  }, []);
+
+  // Set up postMessage listener for MCP Apps
+  useEffect(() => {
+    if (isApp) {
+      window.addEventListener('message', handleMessage);
+      return () => window.removeEventListener('message', handleMessage);
+    }
+  }, [isApp, handleMessage]);
 
   // Auto-resize iframe to fit content
   const handleIframeLoad = () => {
@@ -102,13 +188,18 @@ function ContentRenderer({ item, resourceName }: { item: ResourceContentItem; re
     );
   }
 
-  // Render HTML content
+  // Render HTML content (including MCP Apps per SEP-1865)
   if (category === 'html' && item.text) {
     return (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs text-[var(--foreground-muted)]">{item.mimeType || 'text/html'}</span>
+            {isApp && (
+              <span className="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded font-medium">
+                MCP App
+              </span>
+            )}
             <button
               onClick={() => setShowRaw(!showRaw)}
               className="px-2 py-0.5 text-xs bg-[var(--background-tertiary)] hover:bg-[var(--border)] rounded transition-colors"
@@ -130,12 +221,13 @@ function ContentRenderer({ item, resourceName }: { item: ResourceContentItem; re
           </pre>
         ) : (
           <div className="rounded-lg overflow-hidden border border-[var(--border)] bg-white">
+            {/* SEP-1865: Sandboxed iframe with allow-scripts allow-same-origin */}
             <iframe
               ref={iframeRef}
               srcDoc={item.text}
               title={resourceName}
               className="w-full"
-              sandbox="allow-same-origin allow-scripts"
+              sandbox="allow-scripts allow-same-origin"
               style={{ border: 'none', height: `${iframeHeight}px` }}
               onLoad={handleIframeLoad}
             />
@@ -231,6 +323,7 @@ const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: 
 
     try {
       const result = await onRead();
+      console.log('[ResourceCard] Raw result:', JSON.stringify(result, null, 2));
       setRawResult(result);
 
       // Parse the result - MCP returns { contents: [...] }

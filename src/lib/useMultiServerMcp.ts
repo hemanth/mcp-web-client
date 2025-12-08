@@ -232,7 +232,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         headers['x-mcp-session-id'] = connection.sessionId;
       }
 
-      console.log(`[${serverId}] Sending Streamable HTTP request:`, method);
+      console.log(`[${serverId}] Sending Streamable HTTP request:`, method, 'sessionId:', connection.sessionId);
 
       const response = await fetch('/api/mcp/streamable', {
         method: 'POST',
@@ -242,8 +242,10 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
 
       // Capture session ID from response
       const responseSessionId = response.headers.get('mcp-session-id');
+      console.log(`[${serverId}] Response session ID:`, responseSessionId, 'current:', connection.sessionId);
       if (responseSessionId) {
         connection.sessionId = responseSessionId;
+        console.log(`[${serverId}] Session ID updated to:`, connection.sessionId);
       }
 
       const contentType = response.headers.get('content-type') || '';
@@ -585,6 +587,12 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
           tools: {},
           resources: {},
           prompts: {},
+          // SEP-1865: Advertise MCP Apps UI extension support
+          extensions: {
+            'io.modelcontextprotocol/ui': {
+              mimeTypes: ['text/html;profile=mcp-app'],
+            },
+          },
         },
         clientInfo: {
           name: 'MCP Web Client',
