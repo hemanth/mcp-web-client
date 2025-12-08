@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
 
     console.log('Streamable HTTP proxy sending to:', serverUrl);
     console.log('Request body:', JSON.stringify(body));
+    console.log('Incoming session ID from client:', sessionId);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
 
     if (sessionId) {
       headers['Mcp-Session-Id'] = sessionId;
+      console.log('Forwarding session ID to MCP server:', sessionId);
     }
 
     const response = await fetch(serverUrl, {
@@ -44,6 +46,7 @@ export async function POST(request: NextRequest) {
 
     // Get session ID from response if present
     const responseSessionId = response.headers.get('mcp-session-id');
+    console.log('Response session ID from MCP server:', responseSessionId);
 
     if (!response.ok) {
       const errorText = await response.text();

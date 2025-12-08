@@ -325,6 +325,12 @@ export function useMcpClient(options: UseMcpClientOptions = {}) {
           tools: {},
           resources: {},
           prompts: {},
+          // SEP-1865: Advertise MCP Apps UI extension support
+          extensions: {
+            'io.modelcontextprotocol/ui': {
+              mimeTypes: ['text/html;profile=mcp-app'],
+            },
+          },
         },
         clientInfo: {
           name: 'MCP Web Client',
