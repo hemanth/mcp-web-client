@@ -420,7 +420,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
   const addServer = useCallback(async (
     url: string,
     name?: string,
-    credentials?: OAuthCredentials
+    credentials?: OAuthCredentials,
+    explicitTransport?: TransportType
   ): Promise<string> => {
     const serverId = uuidv4();
 
@@ -442,6 +443,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       resources: [],
       prompts: [],
       credentials,
+      transport: explicitTransport,
     };
 
     setServers(prev => {
@@ -463,8 +465,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       throw new Error('Server not found');
     }
 
-    // Detect transport type based on URL
-    const transport = detectTransportType(server.url);
+    // Use stored transport if explicitly set, otherwise auto-detect from URL
+    const transport = server.transport || detectTransportType(server.url);
 
     // Create connection state
     const connection: ServerConnection = {

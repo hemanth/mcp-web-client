@@ -6,7 +6,7 @@ import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
 import { useOAuth } from '@/lib/useOAuth';
 import { ServerList, AddServerModal } from '@/components/ServerList';
 import { ServerInfo } from '@/components/ServerInfo';
-import type { OAuthCredentials } from '@/lib/types';
+import type { OAuthCredentials, TransportType } from '@/lib/types';
 import {
   MessageSquare,
   Wrench,
@@ -156,8 +156,8 @@ export default function Home() {
     return () => window.removeEventListener('message', handleMessage);
   }, [addServer, connectServer, pendingOAuthServer, servers]);
 
-  const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials): Promise<string> => {
-    return await addServer(url, name, credentials);
+  const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType): Promise<string> => {
+    return await addServer(url, name, credentials, transport);
   }, [addServer]);
 
   const handleConnectServer = useCallback(async (serverId: string, credentials?: OAuthCredentials) => {
@@ -188,7 +188,7 @@ export default function Home() {
   }, [registerClient]);
 
   // Handler for direct modal add (used when adding server from empty state)
-  const handleDirectAddServer = useCallback(async (url: string, name: string, authType: 'none' | 'bearer' | 'oauth', bearerToken?: string) => {
+  const handleDirectAddServer = useCallback(async (url: string, name: string, authType: 'none' | 'bearer' | 'oauth', bearerToken?: string, transport?: TransportType) => {
     setIsAddingServer(true);
     try {
       let credentials: OAuthCredentials | undefined;
@@ -200,7 +200,7 @@ export default function Home() {
         };
       }
 
-      const serverId = await addServer(url, name || undefined, credentials);
+      const serverId = await addServer(url, name || undefined, credentials, transport);
 
       // Auto-connect with credentials if provided
       if (authType !== 'oauth') {
@@ -560,7 +560,7 @@ export default function Home() {
       {showAddServerModal && (
         <AddServerModal
           onAdd={handleDirectAddServer}
-          onAddServer={handleAddServer}
+          onAddServer={(url, name, transport) => handleAddServer(url, name, undefined, transport)}
           onStartOAuth={handleStartOAuth}
           onRegisterClient={handleRegisterClient}
           onClose={() => setShowAddServerModal(false)}
