@@ -21,7 +21,7 @@ import {
   ExternalLink,
   Pencil,
 } from 'lucide-react';
-import type { ServerInstance, OAuthCredentials } from '@/lib/types';
+import type { ServerInstance, OAuthCredentials, TransportType } from '@/lib/types';
 import { featuredServers, categoryLabels, type FeaturedServer } from '@/lib/featuredServers';
 
 type AuthType = 'none' | 'bearer' | 'oauth';
@@ -31,7 +31,7 @@ interface ServerListProps {
   servers: ServerInstance[];
   activeServerId: string | null;
   onSelectServer: (serverId: string) => void;
-  onAddServer: (url: string, name?: string, credentials?: OAuthCredentials) => Promise<string>;
+  onAddServer: (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType) => Promise<string>;
   onConnectServer: (serverId: string, credentials?: OAuthCredentials) => Promise<void>;
   onDisconnectServer: (serverId: string) => void;
   onRemoveServer: (serverId: string) => void;
@@ -42,8 +42,8 @@ interface ServerListProps {
 }
 
 interface AddServerModalProps {
-  onAdd: (url: string, name: string, authType: AuthType, bearerToken?: string) => void;
-  onAddServer: (url: string, name?: string) => Promise<string>;
+  onAdd: (url: string, name: string, authType: AuthType, bearerToken?: string, transport?: TransportType) => void;
+  onAddServer: (url: string, name?: string, transport?: TransportType) => Promise<string>;
   onStartOAuth: (serverUrl: string, serverId?: string) => Promise<{ success: boolean; error?: string }>;
   onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
   onClose: () => void;
@@ -56,6 +56,7 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
   const [name, setName] = useState('');
   const [authType, setAuthType] = useState<AuthType>('none');
   const [bearerToken, setBearerToken] = useState('');
+  const [transport, setTransport] = useState<TransportType | 'auto'>('auto');
   const [oauthStatus, setOauthStatus] = useState<'idle' | 'registering' | 'authorizing' | 'success' | 'error'>('idle');
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -116,12 +117,14 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
           );
 
           // Add the server without credentials - user will authenticate in popup
-          await onAddServer(url.trim(), name.trim() || undefined);
+          const selectedTransport = transport === 'auto' ? undefined : transport;
+          await onAddServer(url.trim(), name.trim() || undefined, selectedTransport);
           onClose();
           return;
         }
 
-        const serverId = await onAddServer(url.trim(), name.trim() || undefined);
+        const selectedTransport = transport === 'auto' ? undefined : transport;
+        const serverId = await onAddServer(url.trim(), name.trim() || undefined, selectedTransport);
         setOauthStatus('authorizing');
 
         const authResult = await onStartOAuth(url.trim(), serverId);
@@ -137,7 +140,8 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
         setOauthError(error instanceof Error ? error.message : 'OAuth failed');
       }
     } else {
-      onAdd(url.trim(), name.trim(), authType, authType === 'bearer' ? bearerToken : undefined);
+      const selectedTransport = transport === 'auto' ? undefined : transport;
+      onAdd(url.trim(), name.trim(), authType, authType === 'bearer' ? bearerToken : undefined, selectedTransport);
       onClose();
     }
   };
@@ -324,6 +328,32 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
                       } disabled:opacity-50`}
                     >
                       <option.icon className="w-3.5 h-3.5" />
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Transport Type */}
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Transport</label>
+                <div className="flex gap-1.5 p-1 bg-[var(--background-tertiary)] rounded-lg">
+                  {[
+                    { value: 'auto' as const, label: 'Auto' },
+                    { value: 'sse' as const, label: 'SSE' },
+                    { value: 'streamable-http' as const, label: 'HTTP' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setTransport(option.value)}
+                      disabled={isProcessing}
+                      className={`flex-1 flex items-center justify-center py-1.5 px-2 rounded-md text-xs font-medium transition-all ${
+                        transport === option.value
+                          ? 'bg-[var(--accent)] text-white'
+                          : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)]'
+                      } disabled:opacity-50`}
+                    >
                       {option.label}
                     </button>
                   ))}
@@ -827,7 +857,7 @@ export function ServerList({
   const [isAdding, setIsAdding] = useState(false);
   const [editingServer, setEditingServer] = useState<ServerInstance | null>(null);
 
-  const handleAddServer = async (url: string, name: string, authType: AuthType, bearerToken?: string) => {
+  const handleAddServer = async (url: string, name: string, authType: AuthType, bearerToken?: string, transport?: TransportType) => {
     setIsAdding(true);
     try {
       let credentials: OAuthCredentials | undefined;
@@ -839,7 +869,7 @@ export function ServerList({
         };
       }
 
-      const serverId = await onAddServer(url, name || undefined, credentials);
+      const serverId = await onAddServer(url, name || undefined, credentials, transport);
 
       // Auto-connect with credentials if provided
       if (authType !== 'oauth') {
@@ -911,7 +941,7 @@ export function ServerList({
         {showAddModal && (
           <AddServerModal
             onAdd={handleAddServer}
-            onAddServer={onAddServer}
+            onAddServer={(url, name, transport) => onAddServer(url, name, undefined, transport)}
             onStartOAuth={onStartOAuth}
             onRegisterClient={onRegisterClient}
             onClose={() => setShowAddModal(false)}
@@ -981,7 +1011,7 @@ export function ServerList({
       {showAddModal && (
         <AddServerModal
           onAdd={handleAddServer}
-          onAddServer={onAddServer}
+          onAddServer={(url, name, transport) => onAddServer(url, name, undefined, transport)}
           onStartOAuth={onStartOAuth}
           onRegisterClient={onRegisterClient}
           onClose={() => setShowAddModal(false)}
