@@ -156,8 +156,8 @@ export default function Home() {
     return () => window.removeEventListener('message', handleMessage);
   }, [addServer, connectServer, pendingOAuthServer, servers]);
 
-  const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType): Promise<string> => {
-    return await addServer(url, name, credentials, transport);
+  const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType, customHeaders?: Record<string, string>): Promise<string> => {
+    return await addServer(url, name, credentials, transport, customHeaders);
   }, [addServer]);
 
   const handleConnectServer = useCallback(async (serverId: string, credentials?: OAuthCredentials) => {
@@ -560,7 +560,7 @@ export default function Home() {
       {showAddServerModal && (
         <AddServerModal
           onAdd={handleDirectAddServer}
-          onAddServer={(url, name, transport) => handleAddServer(url, name, undefined, transport)}
+          onAddServer={(url, name, transport, customHeaders) => handleAddServer(url, name, undefined, transport, customHeaders)}
           onStartOAuth={handleStartOAuth}
           onRegisterClient={handleRegisterClient}
           onClose={() => setShowAddServerModal(false)}

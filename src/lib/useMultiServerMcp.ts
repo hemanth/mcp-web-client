@@ -59,6 +59,7 @@ interface ServerConnection {
   serverUrl: string;
   transport: TransportType;
   credentials: OAuthCredentials | null;
+  customHeaders: Record<string, string> | null;
   sessionId: string | null;
   messageEndpoint: string | null;
   pendingRequests: Map<string, {
@@ -74,6 +75,7 @@ interface StoredServer {
   url: string;
   name: string;
   credentials?: OAuthCredentials;
+  customHeaders?: Record<string, string>;
   wasConnected?: boolean; // Track if server was connected before page refresh
 }
 
@@ -91,6 +93,7 @@ function loadStoredServers(): (ServerInstance & { wasConnected?: boolean })[] {
       resources: [],
       prompts: [],
       wasConnected: s.wasConnected,
+      customHeaders: s.customHeaders,
     }));
   } catch {
     return [];
@@ -106,6 +109,7 @@ function saveServers(servers: ServerInstance[]) {
       url: s.url,
       name: s.name,
       credentials: s.credentials,
+      customHeaders: s.customHeaders,
       wasConnected: s.status === 'connected', // Remember connection state
     }));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
@@ -190,6 +194,11 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       headers['x-mcp-session-id'] = connection.sessionId;
     }
 
+    // Pass custom headers as JSON-encoded header
+    if (connection.customHeaders && Object.keys(connection.customHeaders).length > 0) {
+      headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
+    }
+
     console.log(`[${serverId}] Sending MCP notification:`, method);
 
     fetch(apiEndpoint, {
@@ -230,6 +239,11 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
 
       if (connection.sessionId) {
         headers['x-mcp-session-id'] = connection.sessionId;
+      }
+
+      // Pass custom headers as JSON-encoded header
+      if (connection.customHeaders && Object.keys(connection.customHeaders).length > 0) {
+        headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
       }
 
       console.log(`[${serverId}] Sending Streamable HTTP request:`, method, 'sessionId:', connection.sessionId);
@@ -347,6 +361,11 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         headers['x-mcp-session-id'] = connection.sessionId;
       }
 
+      // Pass custom headers as JSON-encoded header
+      if (connection.customHeaders && Object.keys(connection.customHeaders).length > 0) {
+        headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
+      }
+
       console.log(`[${serverId}] Sending MCP request:`, method, 'to:', targetUrl);
 
       fetch('/api/mcp/message', {
@@ -421,7 +440,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     url: string,
     name?: string,
     credentials?: OAuthCredentials,
-    explicitTransport?: TransportType
+    explicitTransport?: TransportType,
+    customHeaders?: Record<string, string>
   ): Promise<string> => {
     const serverId = uuidv4();
 
@@ -444,6 +464,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       prompts: [],
       credentials,
       transport: explicitTransport,
+      customHeaders,
     };
 
     setServers(prev => {
@@ -473,6 +494,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       serverUrl: server.url,
       transport,
       credentials: credentials || server.credentials || null,
+      customHeaders: server.customHeaders || null,
       sessionId: null,
       messageEndpoint: null,
       pendingRequests: new Map(),
@@ -501,6 +523,11 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
           // Normalize token type to 'Bearer' (capitalized) as per RFC 6750
           const tokenType = (connection.credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
           headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
+        }
+
+        // Pass custom headers as JSON-encoded header
+        if (connection.customHeaders && Object.keys(connection.customHeaders).length > 0) {
+          headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
         }
 
         const response = await fetch(sseUrl, {
@@ -718,8 +745,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     }
   }, [activeServerId, disconnectServer]);
 
-  // Edit a server's URL and name
-  const editServer = useCallback((serverId: string, url: string, name?: string) => {
+  // Edit a server's URL, name, and custom headers
+  const editServer = useCallback((serverId: string, url: string, name?: string, customHeaders?: Record<string, string>) => {
     const server = servers.find(s => s.id === serverId);
     if (!server) return;
 
@@ -738,7 +765,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     }
 
     setServers(prev => prev.map(s =>
-      s.id === serverId ? { ...s, url, name: serverName! } : s
+      s.id === serverId ? { ...s, url, name: serverName!, customHeaders } : s
     ));
   }, [servers, disconnectServer]);
 

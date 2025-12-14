@@ -5,6 +5,7 @@ export async function POST(request: NextRequest) {
   const serverUrl = request.headers.get('x-mcp-server-url');
   const authorization = request.headers.get('authorization');
   const sessionId = request.headers.get('x-mcp-session-id');
+  const customHeadersJson = request.headers.get('x-mcp-custom-headers');
 
   if (!serverUrl) {
     return NextResponse.json(
@@ -43,6 +44,23 @@ export async function POST(request: NextRequest) {
 
     if (sessionId) {
       headers['X-MCP-Session-ID'] = sessionId;
+    }
+
+    // Parse and apply custom headers
+    if (customHeadersJson) {
+      try {
+        const customHeaders = JSON.parse(customHeadersJson) as Record<string, string>;
+        for (const [key, value] of Object.entries(customHeaders)) {
+          // Skip headers that could interfere with the proxy
+          const lowerKey = key.toLowerCase();
+          if (lowerKey !== 'host' && lowerKey !== 'content-length' && lowerKey !== 'transfer-encoding') {
+            headers[key] = value;
+          }
+        }
+        console.log('Custom headers applied:', Object.keys(customHeaders).join(', '));
+      } catch (e) {
+        console.error('Failed to parse custom headers:', e);
+      }
     }
 
     console.log('Message body:', JSON.stringify(body));
