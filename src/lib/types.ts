@@ -169,4 +169,5 @@ export interface ServerInstance {
   resources: MCPResource[];
   prompts: MCPPrompt[];
   credentials?: OAuthCredentials;
+  customHeaders?: Record<string, string>;
 }

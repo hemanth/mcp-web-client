@@ -20,6 +20,8 @@ import {
   Lock,
   ExternalLink,
   Pencil,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import type { ServerInstance, OAuthCredentials, TransportType } from '@/lib/types';
 import { featuredServers, categoryLabels, type FeaturedServer } from '@/lib/featuredServers';
@@ -31,19 +33,19 @@ interface ServerListProps {
   servers: ServerInstance[];
   activeServerId: string | null;
   onSelectServer: (serverId: string) => void;
-  onAddServer: (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType) => Promise<string>;
+  onAddServer: (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType, customHeaders?: Record<string, string>) => Promise<string>;
   onConnectServer: (serverId: string, credentials?: OAuthCredentials) => Promise<void>;
   onDisconnectServer: (serverId: string) => void;
   onRemoveServer: (serverId: string) => void;
-  onEditServer: (serverId: string, url: string, name?: string) => void;
+  onEditServer: (serverId: string, url: string, name?: string, customHeaders?: Record<string, string>) => void;
   onStartOAuth: (serverUrl: string, serverId?: string) => Promise<{ success: boolean; error?: string }>;
   onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
   collapsed?: boolean;
 }
 
 interface AddServerModalProps {
-  onAdd: (url: string, name: string, authType: AuthType, bearerToken?: string, transport?: TransportType) => void;
-  onAddServer: (url: string, name?: string, transport?: TransportType) => Promise<string>;
+  onAdd: (url: string, name: string, authType: AuthType, bearerToken?: string, transport?: TransportType, customHeaders?: Record<string, string>) => void;
+  onAddServer: (url: string, name?: string, transport?: TransportType, customHeaders?: Record<string, string>) => Promise<string>;
   onStartOAuth: (serverUrl: string, serverId?: string) => Promise<{ success: boolean; error?: string }>;
   onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
   onClose: () => void;
@@ -62,6 +64,32 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
   const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<FeaturedServer['category'] | 'all'>('all');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [customHeaders, setCustomHeaders] = useState<Array<{ key: string; value: string }>>([]);
+
+  const addHeader = () => {
+    setCustomHeaders([...customHeaders, { key: '', value: '' }]);
+  };
+
+  const removeHeader = (index: number) => {
+    setCustomHeaders(customHeaders.filter((_, i) => i !== index));
+  };
+
+  const updateHeader = (index: number, field: 'key' | 'value', value: string) => {
+    const updated = [...customHeaders];
+    updated[index][field] = value;
+    setCustomHeaders(updated);
+  };
+
+  const getCustomHeadersObject = (): Record<string, string> | undefined => {
+    const headers: Record<string, string> = {};
+    for (const h of customHeaders) {
+      if (h.key.trim() && h.value.trim()) {
+        headers[h.key.trim()] = h.value.trim();
+      }
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -88,6 +116,8 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
+
+    const headers = getCustomHeadersObject();
 
     if (authType === 'oauth') {
       setOauthStatus('registering');
@@ -118,13 +148,13 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
 
           // Add the server without credentials - user will authenticate in popup
           const selectedTransport = transport === 'auto' ? undefined : transport;
-          await onAddServer(url.trim(), name.trim() || undefined, selectedTransport);
+          await onAddServer(url.trim(), name.trim() || undefined, selectedTransport, headers);
           onClose();
           return;
         }
 
         const selectedTransport = transport === 'auto' ? undefined : transport;
-        const serverId = await onAddServer(url.trim(), name.trim() || undefined, selectedTransport);
+        const serverId = await onAddServer(url.trim(), name.trim() || undefined, selectedTransport, headers);
         setOauthStatus('authorizing');
 
         const authResult = await onStartOAuth(url.trim(), serverId);
@@ -141,7 +171,7 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
       }
     } else {
       const selectedTransport = transport === 'auto' ? undefined : transport;
-      onAdd(url.trim(), name.trim(), authType, authType === 'bearer' ? bearerToken : undefined, selectedTransport);
+      onAdd(url.trim(), name.trim(), authType, authType === 'bearer' ? bearerToken : undefined, selectedTransport, headers);
       onClose();
     }
   };
@@ -376,6 +406,77 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
                 </div>
               )}
 
+              {/* Advanced Settings */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="flex items-center gap-1.5 text-sm text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
+                  disabled={isProcessing}
+                >
+                  {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  Advanced
+                  {customHeaders.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 bg-[var(--accent)]/20 text-[var(--accent)] rounded text-xs">
+                      {customHeaders.length}
+                    </span>
+                  )}
+                </button>
+
+                {showAdvanced && (
+                  <div className="mt-2 p-3 bg-[var(--background-tertiary)] rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-[var(--foreground-muted)]">Custom Headers</label>
+                      <button
+                        type="button"
+                        onClick={addHeader}
+                        disabled={isProcessing}
+                        className="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors disabled:opacity-50"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add
+                      </button>
+                    </div>
+                    {customHeaders.length === 0 ? (
+                      <p className="text-xs text-[var(--foreground-muted)]">
+                        No custom headers. Click &quot;Add&quot; to add headers that will be sent with every request.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {customHeaders.map((header, index) => (
+                          <div key={index} className="flex gap-2 items-center">
+                            <input
+                              type="text"
+                              value={header.key}
+                              onChange={(e) => updateHeader(index, 'key', e.target.value)}
+                              placeholder="Header name"
+                              className="flex-1 px-2 py-1.5 bg-[var(--background-secondary)] border border-[var(--border)] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-[var(--foreground-muted)]"
+                              disabled={isProcessing}
+                            />
+                            <input
+                              type="text"
+                              value={header.value}
+                              onChange={(e) => updateHeader(index, 'value', e.target.value)}
+                              placeholder="Value"
+                              className="flex-1 px-2 py-1.5 bg-[var(--background-secondary)] border border-[var(--border)] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-[var(--foreground-muted)]"
+                              disabled={isProcessing}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeHeader(index)}
+                              disabled={isProcessing}
+                              className="p-1 text-[var(--foreground-muted)] hover:text-red-400 transition-colors disabled:opacity-50"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* OAuth Status */}
               {authType === 'oauth' && oauthStatus !== 'idle' && (
                 <div className={`p-2.5 rounded-lg border flex items-center gap-2 ${
@@ -431,7 +532,7 @@ export function AddServerModal({ onAdd, onAddServer, onStartOAuth, onRegisterCli
 
 interface EditServerModalProps {
   server: ServerInstance;
-  onSave: (url: string, name: string, authType: AuthType, bearerToken?: string) => void;
+  onSave: (url: string, name: string, authType: AuthType, bearerToken?: string, customHeaders?: Record<string, string>) => void;
   onStartOAuth: (serverUrl: string) => Promise<{ success: boolean; error?: string }>;
   onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
   onClose: () => void;
@@ -457,6 +558,35 @@ export function EditServerModal({ server, onSave, onStartOAuth, onRegisterClient
   );
   const [oauthStatus, setOauthStatus] = useState<'idle' | 'registering' | 'authorizing' | 'error'>('idle');
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [customHeaders, setCustomHeaders] = useState<Array<{ key: string; value: string }>>(() => {
+    if (!server.customHeaders) return [];
+    return Object.entries(server.customHeaders).map(([key, value]) => ({ key, value }));
+  });
+
+  const addHeader = () => {
+    setCustomHeaders([...customHeaders, { key: '', value: '' }]);
+  };
+
+  const removeHeader = (index: number) => {
+    setCustomHeaders(customHeaders.filter((_, i) => i !== index));
+  };
+
+  const updateHeader = (index: number, field: 'key' | 'value', value: string) => {
+    const updated = [...customHeaders];
+    updated[index][field] = value;
+    setCustomHeaders(updated);
+  };
+
+  const getCustomHeadersObject = (): Record<string, string> | undefined => {
+    const headers: Record<string, string> = {};
+    for (const h of customHeaders) {
+      if (h.key.trim() && h.value.trim()) {
+        headers[h.key.trim()] = h.value.trim();
+      }
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -468,6 +598,8 @@ export function EditServerModal({ server, onSave, onStartOAuth, onRegisterClient
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
+
+    const headers = getCustomHeadersObject();
 
     if (authType === 'oauth') {
       setOauthStatus('registering');
@@ -495,7 +627,7 @@ export function EditServerModal({ server, onSave, onStartOAuth, onRegisterClient
             `width=${width},height=${height},left=${left},top=${top},popup=yes`
           );
 
-          onSave(url.trim(), name.trim(), 'none');
+          onSave(url.trim(), name.trim(), 'none', undefined, headers);
           onClose();
           return;
         }
@@ -514,7 +646,7 @@ export function EditServerModal({ server, onSave, onStartOAuth, onRegisterClient
         setOauthError(error instanceof Error ? error.message : 'OAuth failed');
       }
     } else {
-      onSave(url.trim(), name.trim(), authType, authType === 'bearer' ? bearerToken : undefined);
+      onSave(url.trim(), name.trim(), authType, authType === 'bearer' ? bearerToken : undefined, headers);
       onClose();
     }
   };
@@ -613,6 +745,77 @@ export function EditServerModal({ server, onSave, onStartOAuth, onRegisterClient
               />
             </div>
           )}
+
+          {/* Advanced Settings */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center gap-1.5 text-sm text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
+              disabled={isProcessing}
+            >
+              {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              Advanced
+              {customHeaders.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 bg-[var(--accent)]/20 text-[var(--accent)] rounded text-xs">
+                  {customHeaders.length}
+                </span>
+              )}
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-2 p-3 bg-[var(--background-tertiary)] rounded-lg space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-[var(--foreground-muted)]">Custom Headers</label>
+                  <button
+                    type="button"
+                    onClick={addHeader}
+                    disabled={isProcessing}
+                    className="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors disabled:opacity-50"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add
+                  </button>
+                </div>
+                {customHeaders.length === 0 ? (
+                  <p className="text-xs text-[var(--foreground-muted)]">
+                    No custom headers. Click &quot;Add&quot; to add headers that will be sent with every request.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {customHeaders.map((header, index) => (
+                      <div key={index} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={header.key}
+                          onChange={(e) => updateHeader(index, 'key', e.target.value)}
+                          placeholder="Header name"
+                          className="flex-1 px-2 py-1.5 bg-[var(--background-secondary)] border border-[var(--border)] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-[var(--foreground-muted)]"
+                          disabled={isProcessing}
+                        />
+                        <input
+                          type="text"
+                          value={header.value}
+                          onChange={(e) => updateHeader(index, 'value', e.target.value)}
+                          placeholder="Value"
+                          className="flex-1 px-2 py-1.5 bg-[var(--background-secondary)] border border-[var(--border)] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-[var(--foreground-muted)]"
+                          disabled={isProcessing}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeHeader(index)}
+                          disabled={isProcessing}
+                          className="p-1 text-[var(--foreground-muted)] hover:text-red-400 transition-colors disabled:opacity-50"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* OAuth Status */}
           {authType === 'oauth' && oauthStatus !== 'idle' && (
@@ -857,7 +1060,7 @@ export function ServerList({
   const [isAdding, setIsAdding] = useState(false);
   const [editingServer, setEditingServer] = useState<ServerInstance | null>(null);
 
-  const handleAddServer = async (url: string, name: string, authType: AuthType, bearerToken?: string, transport?: TransportType) => {
+  const handleAddServer = async (url: string, name: string, authType: AuthType, bearerToken?: string, transport?: TransportType, customHeaders?: Record<string, string>) => {
     setIsAdding(true);
     try {
       let credentials: OAuthCredentials | undefined;
@@ -869,7 +1072,7 @@ export function ServerList({
         };
       }
 
-      const serverId = await onAddServer(url, name || undefined, credentials, transport);
+      const serverId = await onAddServer(url, name || undefined, credentials, transport, customHeaders);
 
       // Auto-connect with credentials if provided
       if (authType !== 'oauth') {
@@ -883,7 +1086,7 @@ export function ServerList({
     }
   };
 
-  const handleEditSave = async (url: string, name: string, authType: AuthType, bearerToken?: string) => {
+  const handleEditSave = async (url: string, name: string, authType: AuthType, bearerToken?: string, customHeaders?: Record<string, string>) => {
     if (editingServer) {
       let credentials: OAuthCredentials | undefined;
 
@@ -896,7 +1099,7 @@ export function ServerList({
         credentials = undefined;
       }
 
-      onEditServer(editingServer.id, url, name || undefined);
+      onEditServer(editingServer.id, url, name || undefined, customHeaders);
 
       // If credentials changed, reconnect with new credentials
       if (credentials !== undefined || authType === 'none') {
@@ -941,7 +1144,7 @@ export function ServerList({
         {showAddModal && (
           <AddServerModal
             onAdd={handleAddServer}
-            onAddServer={(url, name, transport) => onAddServer(url, name, undefined, transport)}
+            onAddServer={(url, name, transport, customHeaders) => onAddServer(url, name, undefined, transport, customHeaders)}
             onStartOAuth={onStartOAuth}
             onRegisterClient={onRegisterClient}
             onClose={() => setShowAddModal(false)}
@@ -1011,7 +1214,7 @@ export function ServerList({
       {showAddModal && (
         <AddServerModal
           onAdd={handleAddServer}
-          onAddServer={(url, name, transport) => onAddServer(url, name, undefined, transport)}
+          onAddServer={(url, name, transport, customHeaders) => onAddServer(url, name, undefined, transport, customHeaders)}
           onStartOAuth={onStartOAuth}
           onRegisterClient={onRegisterClient}
           onClose={() => setShowAddModal(false)}
