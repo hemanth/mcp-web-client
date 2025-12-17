@@ -15,6 +15,8 @@ export interface MCPCapabilities {
   resources?: boolean;
   prompts?: boolean;
   logging?: boolean;
+  sampling?: boolean;
+  elicitation?: boolean;
 }
 
 export interface MCPInitializeParams {
@@ -170,4 +172,158 @@ export interface ServerInstance {
   prompts: MCPPrompt[];
   credentials?: OAuthCredentials;
   customHeaders?: Record<string, string>;
+}
+
+// Sampling Types (Server requests LLM completion from client)
+
+export type Role = 'user' | 'assistant';
+
+export interface TextContent {
+  type: 'text';
+  text: string;
+}
+
+export interface ImageContent {
+  type: 'image';
+  data: string; // base64
+  mimeType: string;
+}
+
+export interface AudioContent {
+  type: 'audio';
+  data: string; // base64
+  mimeType: string;
+}
+
+export type SamplingMessageContent = TextContent | ImageContent | AudioContent;
+
+export interface SamplingMessage {
+  role: Role;
+  content: SamplingMessageContent | SamplingMessageContent[];
+}
+
+export interface ModelHint {
+  name?: string;
+}
+
+export interface ModelPreferences {
+  hints?: ModelHint[];
+  costPriority?: number;
+  speedPriority?: number;
+  intelligencePriority?: number;
+}
+
+export interface CreateMessageRequestParams {
+  messages: SamplingMessage[];
+  modelPreferences?: ModelPreferences;
+  systemPrompt?: string;
+  includeContext?: 'none' | 'thisServer' | 'allServers';
+  temperature?: number;
+  maxTokens: number;
+  stopSequences?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateMessageResult {
+  role: Role;
+  content: SamplingMessageContent;
+  model: string;
+  stopReason?: 'endTurn' | 'stopSequence' | 'maxTokens' | string;
+}
+
+export interface SamplingRequest {
+  id: string | number;
+  serverId: string;
+  serverName: string;
+  params: CreateMessageRequestParams;
+  timestamp: number;
+}
+
+// Elicitation Types (Server requests user input from client)
+
+export interface StringSchema {
+  type: 'string';
+  title?: string;
+  description?: string;
+  minLength?: number;
+  maxLength?: number;
+  format?: 'email' | 'uri' | 'date' | 'date-time';
+  default?: string;
+}
+
+export interface NumberSchema {
+  type: 'number' | 'integer';
+  title?: string;
+  description?: string;
+  minimum?: number;
+  maximum?: number;
+  default?: number;
+}
+
+export interface BooleanSchema {
+  type: 'boolean';
+  title?: string;
+  description?: string;
+  default?: boolean;
+}
+
+export interface SingleSelectEnumSchema {
+  type: 'string';
+  title?: string;
+  description?: string;
+  enum?: string[];
+  oneOf?: Array<{ const: string; title: string }>;
+  default?: string;
+}
+
+export interface MultiSelectEnumSchema {
+  type: 'array';
+  title?: string;
+  description?: string;
+  minItems?: number;
+  maxItems?: number;
+  items: {
+    enum?: string[];
+    anyOf?: Array<{ const: string; title: string }>;
+  };
+  default?: string[];
+}
+
+export type PrimitiveSchemaDefinition =
+  | StringSchema
+  | NumberSchema
+  | BooleanSchema
+  | SingleSelectEnumSchema
+  | MultiSelectEnumSchema;
+
+export interface ElicitRequestFormParams {
+  mode?: 'form';
+  message: string;
+  requestedSchema: {
+    type: 'object';
+    properties: Record<string, PrimitiveSchemaDefinition>;
+    required?: string[];
+  };
+}
+
+export interface ElicitRequestURLParams {
+  mode: 'url';
+  message: string;
+  elicitationId: string;
+  url: string;
+}
+
+export type ElicitRequestParams = ElicitRequestFormParams | ElicitRequestURLParams;
+
+export interface ElicitResult {
+  action: 'accept' | 'decline' | 'cancel';
+  content?: Record<string, string | number | boolean | string[]>;
+}
+
+export interface ElicitationRequest {
+  id: string | number;
+  serverId: string;
+  serverName: string;
+  params: ElicitRequestParams;
+  timestamp: number;
 }
