@@ -6,7 +6,10 @@ import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
 import { useOAuth } from '@/lib/useOAuth';
 import { ServerList, AddServerModal } from '@/components/ServerList';
 import { ServerInfo } from '@/components/ServerInfo';
-import type { OAuthCredentials, TransportType } from '@/lib/types';
+import { SamplingModal } from '@/components/SamplingModal';
+import { ElicitationModal } from '@/components/ElicitationModal';
+import { useLLMSettings } from '@/components/LLMSettings';
+import type { OAuthCredentials, TransportType, SamplingRequest, CreateMessageResult, ElicitationRequest, ElicitResult } from '@/lib/types';
 import {
   MessageSquare,
   Wrench,
@@ -96,6 +99,17 @@ export default function Home() {
   const [showAddServerModal, setShowAddServerModal] = useState(false);
   const [isAddingServer, setIsAddingServer] = useState(false);
 
+  // Sampling state
+  const [pendingSamplingRequest, setPendingSamplingRequest] = useState<SamplingRequest | null>(null);
+  const [isSamplingProcessing, setIsSamplingProcessing] = useState(false);
+  const [samplingResult, setSamplingResult] = useState<{ success: boolean; content?: string; error?: string } | undefined>();
+
+  // Elicitation state
+  const [pendingElicitationRequest, setPendingElicitationRequest] = useState<ElicitationRequest | null>(null);
+
+  // LLM settings for sampling
+  const { settings: llmSettings } = useLLMSettings();
+
   const {
     registerClient,
     startOAuth,
@@ -116,9 +130,20 @@ export default function Home() {
     readResource,
     getPrompt,
     getAllTools,
+    respondToSamplingRequest,
+    respondToElicitationRequest,
   } = useMultiServerMcp({
     onError: useCallback((serverId: string, error: Error) => {
       toast.error(error.message);
+    }, []),
+    onSamplingRequest: useCallback((request: SamplingRequest) => {
+      console.log('Received sampling request:', request);
+      setPendingSamplingRequest(request);
+      setSamplingResult(undefined);
+    }, []),
+    onElicitationRequest: useCallback((request: ElicitationRequest) => {
+      console.log('Received elicitation request:', request);
+      setPendingElicitationRequest(request);
     }, []),
   });
 
@@ -241,6 +266,137 @@ export default function Home() {
     // Fallback to active server if no serverId provided
     return await callTool(name, args);
   }, [callTool, callToolOnServer]);
+
+  // Handler for approving sampling requests
+  const handleApproveSampling = useCallback(async () => {
+    if (!pendingSamplingRequest) return;
+
+    // Check if LLM is configured
+    if (!llmSettings.activeProvider) {
+      toast.error('No LLM provider configured. Please configure one in Chat settings.');
+      return;
+    }
+
+    const providerConfig = llmSettings.providers[llmSettings.activeProvider];
+    if (!providerConfig) {
+      toast.error('LLM provider configuration not found.');
+      return;
+    }
+
+    setIsSamplingProcessing(true);
+    try {
+      // Convert MCP sampling messages to LLM chat format
+      const messages = pendingSamplingRequest.params.messages.map(msg => {
+        const content = Array.isArray(msg.content)
+          ? msg.content.map(c => c.type === 'text' ? c.text : '').join('\n')
+          : msg.content.type === 'text' ? msg.content.text : '';
+        return {
+          role: msg.role,
+          content,
+        };
+      });
+
+      // Call the LLM API with the user's configured provider
+      const response = await fetch('/api/llm/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: llmSettings.activeProvider,
+          model: providerConfig.model,
+          messages,
+          systemPrompt: pendingSamplingRequest.params.systemPrompt,
+          apiKey: providerConfig.apiKey,
+          baseUrl: providerConfig.baseUrl,
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'LLM request failed');
+      }
+
+      const data = await response.json();
+      const resultContent = data.message?.content || '';
+
+      // Send the result back to the MCP server
+      const result: CreateMessageResult = {
+        role: 'assistant',
+        content: { type: 'text', text: resultContent },
+        model: providerConfig.model,
+        stopReason: 'endTurn',
+      };
+
+      await respondToSamplingRequest(
+        pendingSamplingRequest.serverId,
+        pendingSamplingRequest.id,
+        result
+      );
+
+      setSamplingResult({ success: true, content: resultContent });
+      toast.success('Sampling request completed');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setSamplingResult({ success: false, error: errorMessage });
+
+      // Send error response to server
+      await respondToSamplingRequest(
+        pendingSamplingRequest.serverId,
+        pendingSamplingRequest.id,
+        { error: { code: -32000, message: errorMessage } }
+      );
+
+      toast.error(`Sampling failed: ${errorMessage}`);
+    } finally {
+      setIsSamplingProcessing(false);
+    }
+  }, [pendingSamplingRequest, respondToSamplingRequest, llmSettings]);
+
+  // Handler for denying sampling requests
+  const handleDenySampling = useCallback(async () => {
+    if (!pendingSamplingRequest) return;
+
+    await respondToSamplingRequest(
+      pendingSamplingRequest.serverId,
+      pendingSamplingRequest.id,
+      { error: { code: -32001, message: 'User denied sampling request' } }
+    );
+
+    setPendingSamplingRequest(null);
+    setSamplingResult(undefined);
+    toast.info('Sampling request denied');
+  }, [pendingSamplingRequest, respondToSamplingRequest]);
+
+  // Handler for submitting elicitation results
+  const handleElicitationSubmit = useCallback(async (result: ElicitResult) => {
+    if (!pendingElicitationRequest) return;
+
+    await respondToElicitationRequest(
+      pendingElicitationRequest.serverId,
+      pendingElicitationRequest.id,
+      result
+    );
+
+    setPendingElicitationRequest(null);
+
+    if (result.action === 'accept') {
+      toast.success('Response submitted successfully');
+    } else if (result.action === 'decline') {
+      toast.info('Request declined');
+    } else {
+      toast.info('Request cancelled');
+    }
+  }, [pendingElicitationRequest, respondToElicitationRequest]);
+
+  // Handler for declining elicitation
+  const handleElicitationDecline = useCallback(() => {
+    setPendingElicitationRequest(null);
+  }, []);
+
+  // Handler for cancelling elicitation
+  const handleElicitationCancel = useCallback(() => {
+    setPendingElicitationRequest(null);
+  }, []);
 
   // Tools for the active server (for the Tools panel)
   const currentTools = activeServer?.tools || [];
@@ -565,6 +721,27 @@ export default function Home() {
           onRegisterClient={handleRegisterClient}
           onClose={() => setShowAddServerModal(false)}
           isLoading={isAddingServer}
+        />
+      )}
+
+      {/* Sampling Request Modal */}
+      {pendingSamplingRequest && (
+        <SamplingModal
+          request={pendingSamplingRequest}
+          onApprove={handleApproveSampling}
+          onDeny={handleDenySampling}
+          isProcessing={isSamplingProcessing}
+          result={samplingResult}
+        />
+      )}
+
+      {/* Elicitation Request Modal */}
+      {pendingElicitationRequest && (
+        <ElicitationModal
+          request={pendingElicitationRequest}
+          onSubmit={handleElicitationSubmit}
+          onDecline={handleElicitationDecline}
+          onCancel={handleElicitationCancel}
         />
       )}
     </div>

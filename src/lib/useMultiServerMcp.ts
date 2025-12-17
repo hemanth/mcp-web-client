@@ -16,6 +16,12 @@ import type {
   ToolCallResult,
   ServerInstance,
   TransportType,
+  SamplingRequest,
+  CreateMessageRequestParams,
+  CreateMessageResult,
+  ElicitationRequest,
+  ElicitRequestParams,
+  ElicitResult,
 } from './types';
 
 // Helper to normalize resource - some servers swap name/uri
@@ -53,6 +59,8 @@ interface UseMultiServerMcpOptions {
   onNotification?: (serverId: string, method: string, params: unknown) => void;
   onServerChange?: (serverId: string, status: ConnectionStatus) => void;
   onError?: (serverId: string, error: Error) => void;
+  onSamplingRequest?: (request: SamplingRequest) => void;
+  onElicitationRequest?: (request: ElicitationRequest) => void;
 }
 
 interface ServerConnection {
@@ -286,12 +294,42 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
                     const data = line.slice(5).trim();
                     if (data) {
                       try {
-                        const parsed = JSON.parse(data) as MCPResponse;
+                        const parsed = JSON.parse(data) as MCPMessage;
+
+                        // Check if this is a request FROM the server (sampling/elicitation)
+                        if ('method' in parsed && 'id' in parsed) {
+                          const server = servers.find(s => s.id === serverId);
+                          const serverName = server?.name || 'Unknown Server';
+
+                          if (parsed.method === 'sampling/createMessage') {
+                            const samplingRequest: SamplingRequest = {
+                              id: parsed.id,
+                              serverId,
+                              serverName,
+                              params: parsed.params as unknown as CreateMessageRequestParams,
+                              timestamp: Date.now(),
+                            };
+                            options.onSamplingRequest?.(samplingRequest);
+                          } else if (parsed.method === 'elicitation/create') {
+                            const elicitationRequest: ElicitationRequest = {
+                              id: parsed.id,
+                              serverId,
+                              serverName,
+                              params: parsed.params as unknown as ElicitRequestParams,
+                              timestamp: Date.now(),
+                            };
+                            options.onElicitationRequest?.(elicitationRequest);
+                          }
+                          continue;
+                        }
+
+                        // Check if this is a response to our request
                         if ('id' in parsed && String(parsed.id) === id) {
-                          if (parsed.error) {
-                            reject(new Error(`${parsed.error.message} (code: ${parsed.error.code})`));
+                          const resp = parsed as MCPResponse;
+                          if (resp.error) {
+                            reject(new Error(`${resp.error.message} (code: ${resp.error.code})`));
                           } else {
-                            resolve(parsed.result);
+                            resolve(resp.result);
                           }
                           return;
                         }
@@ -378,7 +416,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         reject(error);
       });
     });
-  }, []);
+  }, [servers, options]);
 
   // Handle incoming SSE messages for a server
   const createMessageHandler = useCallback((serverId: string) => {
@@ -388,6 +426,36 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         const connection = connectionsRef.current.get(serverId);
 
         if ('id' in data && data.id !== undefined) {
+          // Check if this is a request FROM the server (sampling/elicitation)
+          if ('method' in data) {
+            const server = servers.find(s => s.id === serverId);
+            const serverName = server?.name || 'Unknown Server';
+
+            if (data.method === 'sampling/createMessage') {
+              // Server is requesting LLM sampling
+              const samplingRequest: SamplingRequest = {
+                id: data.id,
+                serverId,
+                serverName,
+                params: data.params as unknown as CreateMessageRequestParams,
+                timestamp: Date.now(),
+              };
+              options.onSamplingRequest?.(samplingRequest);
+            } else if (data.method === 'elicitation/create') {
+              // Server is requesting user input
+              const elicitationRequest: ElicitationRequest = {
+                id: data.id,
+                serverId,
+                serverName,
+                params: data.params as unknown as ElicitRequestParams,
+                timestamp: Date.now(),
+              };
+              options.onElicitationRequest?.(elicitationRequest);
+            }
+            return;
+          }
+
+          // This is a response to our request
           const pending = connection?.pendingRequests.get(String(data.id));
           if (pending) {
             clearTimeout(pending.timeout);
@@ -401,7 +469,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         console.error('Failed to parse SSE message:', error);
       }
     };
-  }, [options]);
+  }, [options, servers]);
 
   // Handle endpoint event for a server
   const createEndpointHandler = useCallback((serverId: string) => {
@@ -616,6 +684,12 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
           tools: {},
           resources: {},
           prompts: {},
+          // Sampling: Allow servers to request LLM completions
+          sampling: {},
+          // Elicitation: Allow servers to request user input
+          elicitation: {
+            form: {},
+          },
           // SEP-1865: Advertise MCP Apps UI extension support
           extensions: {
             'io.modelcontextprotocol/ui': {
@@ -828,6 +902,106 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       .flatMap(s => s.prompts.map(p => ({ ...p, serverId: s.id, serverName: s.name })));
   }, [servers]);
 
+  // Respond to a sampling request from a server
+  const respondToSamplingRequest = useCallback(async (
+    serverId: string,
+    requestId: string | number,
+    result: CreateMessageResult | { error: { code: number; message: string } }
+  ) => {
+    const connection = connectionsRef.current.get(serverId);
+    if (!connection) {
+      console.error('No connection found for server:', serverId);
+      return;
+    }
+
+    const response: MCPResponse = {
+      jsonrpc: '2.0',
+      id: requestId,
+      ...('error' in result ? { error: result.error } : { result }),
+    };
+
+    const targetUrl = connection.messageEndpoint || connection.serverUrl;
+    const apiEndpoint = connection.transport === 'streamable-http'
+      ? '/api/mcp/streamable'
+      : '/api/mcp/message';
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-mcp-server-url': targetUrl,
+    };
+
+    if (connection.credentials) {
+      const tokenType = (connection.credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
+      headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
+    }
+
+    if (connection.sessionId) {
+      headers['x-mcp-session-id'] = connection.sessionId;
+    }
+
+    if (connection.customHeaders && Object.keys(connection.customHeaders).length > 0) {
+      headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
+    }
+
+    console.log(`[${serverId}] Sending sampling response for request:`, requestId);
+
+    await fetch(apiEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(response),
+    });
+  }, []);
+
+  // Respond to an elicitation request from a server
+  const respondToElicitationRequest = useCallback(async (
+    serverId: string,
+    requestId: string | number,
+    result: ElicitResult
+  ) => {
+    const connection = connectionsRef.current.get(serverId);
+    if (!connection) {
+      console.error('No connection found for server:', serverId);
+      return;
+    }
+
+    const response: MCPResponse = {
+      jsonrpc: '2.0',
+      id: requestId,
+      result,
+    };
+
+    const targetUrl = connection.messageEndpoint || connection.serverUrl;
+    const apiEndpoint = connection.transport === 'streamable-http'
+      ? '/api/mcp/streamable'
+      : '/api/mcp/message';
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-mcp-server-url': targetUrl,
+    };
+
+    if (connection.credentials) {
+      const tokenType = (connection.credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
+      headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
+    }
+
+    if (connection.sessionId) {
+      headers['x-mcp-session-id'] = connection.sessionId;
+    }
+
+    if (connection.customHeaders && Object.keys(connection.customHeaders).length > 0) {
+      headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
+    }
+
+    console.log(`[${serverId}] Sending elicitation response for request:`, requestId);
+
+    await fetch(apiEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(response),
+    });
+  }, []);
+
   // Auto-connect servers that were previously connected on page load
   useEffect(() => {
     if (!isInitialized) return;
@@ -887,5 +1061,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     getAllTools,
     getAllResources,
     getAllPrompts,
+    respondToSamplingRequest,
+    respondToElicitationRequest,
   };
 }
