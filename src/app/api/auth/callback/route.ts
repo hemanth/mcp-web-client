@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 // OAuth callback handler
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';

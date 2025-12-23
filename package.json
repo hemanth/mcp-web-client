@@ -6,15 +6,22 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "pages:build": "npx @cloudflare/next-on-pages",
+    "pages:deploy": "npm run pages:build && wrangler pages deploy .vercel/output/static",
+    "preview": "npm run pages:build && wrangler pages dev .vercel/output/static"
   },
   "overrides": {
     "@eslint/eslintrc": "3.3.0"
   },
   "dependencies": {
+    "@auth/d1-adapter": "^1.11.1",
+    "@cloudflare/next-on-pages": "^1.13.16",
+    "@netlify/plugin-nextjs": "^5.15.3",
     "@tailwindcss/typography": "^0.5.19",
     "lucide-react": "^0.555.0",
-    "next": "^16.0.7",
+    "next": "^15.5.9",
+    "next-auth": "^5.0.0-beta.30",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-markdown": "^10.1.0",
@@ -29,7 +36,7 @@
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.0.5",
+    "eslint-config-next": "^15.5.9",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

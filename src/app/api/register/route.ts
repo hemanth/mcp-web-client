@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 // Dynamic Client Registration endpoint
 import { NextRequest, NextResponse } from 'next/server';
 import { discoverOAuthMetadata, registerClient } from '@/lib/oauth';
