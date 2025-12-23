@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 // OAuth Authorization initiation endpoint
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';

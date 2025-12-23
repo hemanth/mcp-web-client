@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 // Message proxy for MCP server
 import { NextRequest, NextResponse } from 'next/server';
 

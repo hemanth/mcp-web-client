@@ -2,13 +2,16 @@
 
 import { useEffect, useState, useCallback, Suspense, lazy, memo } from 'react';
 import { Toaster, toast } from 'sonner';
+import { useSession } from 'next-auth/react';
 import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
 import { useOAuth } from '@/lib/useOAuth';
+import { useServerSync } from '@/lib/useServerSync';
 import { ServerList, AddServerModal } from '@/components/ServerList';
 import { ServerInfo } from '@/components/ServerInfo';
 import { SamplingModal } from '@/components/SamplingModal';
 import { ElicitationModal } from '@/components/ElicitationModal';
 import { useLLMSettings } from '@/components/LLMSettings';
+import { UserMenu } from '@/components/UserMenu';
 import type { OAuthCredentials, TransportType, SamplingRequest, CreateMessageResult, ElicitationRequest, ElicitResult } from '@/lib/types';
 import {
   MessageSquare,
@@ -23,6 +26,7 @@ import {
   Menu,
   X,
   Github,
+  LogIn,
 } from 'lucide-react';
 
 // Dynamic imports for code splitting - panels are lazy loaded
@@ -66,22 +70,20 @@ const NavItem = memo(function NavItem({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-        isActive
-          ? 'bg-[var(--accent)] text-white'
-          : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
-      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive
+        ? 'bg-[var(--accent)] text-white'
+        : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <Icon className="w-5 h-5 flex-shrink-0" />
       {!collapsed && (
         <>
           <span className="flex-1 text-left">{label}</span>
           {count !== null && count > 0 && (
-            <span className={`px-2 py-0.5 rounded-full text-xs ${
-              isActive
-                ? 'bg-white/20 text-white'
-                : 'bg-[var(--background-tertiary)] text-[var(--foreground-muted)]'
-            }`}>
+            <span className={`px-2 py-0.5 rounded-full text-xs ${isActive
+              ? 'bg-white/20 text-white'
+              : 'bg-[var(--background-tertiary)] text-[var(--foreground-muted)]'
+              }`}>
               {count}
             </span>
           )}
@@ -92,6 +94,7 @@ const NavItem = memo(function NavItem({
 });
 
 export default function Home() {
+  const { data: session, status: authStatus } = useSession();
   const [activePanel, setActivePanel] = useState<ActivePanel>('chat');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -145,6 +148,23 @@ export default function Home() {
       console.log('Received elicitation request:', request);
       setPendingElicitationRequest(request);
     }, []),
+  });
+
+  // Server sync with D1 database
+  const { saveServer, deleteServer: deleteServerFromDb, isAuthenticated } = useServerSync({
+    onServersLoaded: useCallback(async (cloudServers: { id: string; name: string; url: string }[]) => {
+      // Merge cloud servers with local - cloud takes precedence
+      for (const cloudServer of cloudServers) {
+        const existingServer = servers.find(s => s.id === cloudServer.id || s.url === cloudServer.url);
+        if (!existingServer) {
+          // Add server from cloud
+          await addServer(cloudServer.url, cloudServer.name);
+        }
+      }
+      if (cloudServers.length > 0) {
+        toast.success('Servers synced from cloud');
+      }
+    }, [servers, addServer]),
   });
 
   // Handle OAuth success from popup
@@ -227,6 +247,11 @@ export default function Home() {
 
       const serverId = await addServer(url, name || undefined, credentials, transport);
 
+      // Sync to D1 if authenticated
+      if (isAuthenticated) {
+        await saveServer({ id: serverId, name: name || url, url, authType });
+      }
+
       // Auto-connect with credentials if provided
       if (authType !== 'oauth') {
         await connectServer(serverId, credentials);
@@ -237,7 +262,15 @@ export default function Home() {
     } finally {
       setIsAddingServer(false);
     }
-  }, [addServer, connectServer]);
+  }, [addServer, connectServer, isAuthenticated, saveServer]);
+
+  // Handler for removing server (with D1 sync)
+  const handleRemoveServer = useCallback(async (serverId: string) => {
+    removeServer(serverId);
+    if (isAuthenticated) {
+      await deleteServerFromDb(serverId);
+    }
+  }, [removeServer, isAuthenticated, deleteServerFromDb]);
 
   const handleDisconnect = useCallback(() => {
     if (activeServer) {
@@ -428,7 +461,7 @@ export default function Home() {
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[var(--accent-muted)] flex items-center justify-center">
             <Zap className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold">MCP Client</span>
+          <span className="font-semibold">MCPHost</span>
         </div>
         <div className="flex items-center gap-1">
           <a
@@ -474,7 +507,7 @@ export default function Home() {
             </div>
             {!sidebarCollapsed && (
               <div>
-                <h1 className="font-bold text-lg gradient-text">MCP Client</h1>
+                <h1 className="font-bold text-lg gradient-text">MCPHost</h1>
                 <p className="text-xs text-[var(--foreground-muted)]">Multi-Server</p>
               </div>
             )}
@@ -513,7 +546,7 @@ export default function Home() {
             onAddServer={handleAddServer}
             onConnectServer={handleConnectServer}
             onDisconnectServer={disconnectServer}
-            onRemoveServer={removeServer}
+            onRemoveServer={handleRemoveServer}
             onEditServer={editServer}
             onStartOAuth={handleStartOAuth}
             onRegisterClient={handleRegisterClient}
@@ -586,6 +619,17 @@ export default function Home() {
             >
               <Github className="w-5 h-5" />
             </a>
+            {session ? (
+              <UserMenu />
+            ) : authStatus !== 'loading' && (
+              <a
+                href="/login"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors"
+              >
+                <LogIn className="w-4 h-4" />
+                Sign in
+              </a>
+            )}
           </div>
         </header>
 
@@ -682,18 +726,16 @@ export default function Home() {
                   key={item.id}
                   onClick={() => setActivePanel(item.id)}
                   disabled={disabled}
-                  className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs ${
-                    isActive
-                      ? 'text-[var(--accent)]'
-                      : 'text-[var(--foreground-muted)]'
-                  } ${disabled ? 'opacity-50' : ''}`}
+                  className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs ${isActive
+                    ? 'text-[var(--accent)]'
+                    : 'text-[var(--foreground-muted)]'
+                    } ${disabled ? 'opacity-50' : ''}`}
                 >
                   <Icon className="w-5 h-5" />
                   <span>{item.label}</span>
                   {item.count !== null && item.count > 0 && (
-                    <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full text-[10px] flex items-center justify-center ${
-                      isActive ? 'bg-[var(--accent)] text-white' : 'bg-[var(--background-tertiary)]'
-                    }`}>
+                    <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full text-[10px] flex items-center justify-center ${isActive ? 'bg-[var(--accent)] text-white' : 'bg-[var(--background-tertiary)]'
+                      }`}>
                       {item.count}
                     </span>
                   )}

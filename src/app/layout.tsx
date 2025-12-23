@@ -1,14 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import { AuthProvider } from "@/components/AuthProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MCP Web Client",
+  title: "MCPHost",
   description: "Connect to remote MCP servers with OAuth authentication support",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "MCP Client",
+    title: "MCPHost",
   },
 };
 
@@ -28,8 +29,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
 }
+

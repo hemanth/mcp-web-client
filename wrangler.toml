@@ -1,0 +1,12 @@
+name = "mcp-web-client"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".vercel/output/static"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mcphost-db"
+database_id = "7e44ef49-05ba-40d7-b1d6-10094104ae0f"
+
+[vars]
+NEXTAUTH_URL = "https://mcphost.link"
