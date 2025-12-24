@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS verification_tokens (
   PRIMARY KEY (identifier, token)
 );
 
--- MCP Server configs per user
+-- MCP Server configs per user (userId is GitHub ID from OAuth)
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id TEXT PRIMARY KEY NOT NULL,
   userId TEXT NOT NULL,
@@ -47,8 +47,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   authType TEXT DEFAULT 'none',
   authConfig TEXT, -- JSON stored as text
   createdAt TEXT NOT NULL DEFAULT (datetime('now')),
-  updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+  updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_userId ON mcp_servers(userId);
