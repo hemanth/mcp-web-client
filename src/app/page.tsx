@@ -202,8 +202,15 @@ export default function Home() {
   }, [addServer, connectServer, pendingOAuthServer, servers]);
 
   const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType, customHeaders?: Record<string, string>): Promise<string> => {
-    return await addServer(url, name, credentials, transport, customHeaders);
-  }, [addServer]);
+    const serverId = await addServer(url, name, credentials, transport, customHeaders);
+
+    // Sync to D1 if authenticated
+    if (isAuthenticated) {
+      await saveServer({ id: serverId, name: name || url, url });
+    }
+
+    return serverId;
+  }, [addServer, isAuthenticated, saveServer]);
 
   const handleConnectServer = useCallback(async (serverId: string, credentials?: OAuthCredentials) => {
     const server = servers.find(s => s.id === serverId);
