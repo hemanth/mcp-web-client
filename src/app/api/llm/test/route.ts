@@ -2,7 +2,7 @@
 import { NextRequest } from 'next/server';
 import type { LLMProvider } from '@/lib/llm-types';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 interface TestRequest {
