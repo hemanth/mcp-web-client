@@ -18,11 +18,6 @@ const nextConfig: NextConfig = {
     optimizePackageImports: ["lucide-react"],
   },
 
-  // Ignore ESLint during builds (fix lints separately)
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-
   // Allow images from GitHub
   images: {
     remotePatterns: [
