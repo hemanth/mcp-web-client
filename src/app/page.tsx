@@ -158,7 +158,7 @@ export default function Home() {
         const existingServer = servers.find(s => s.id === cloudServer.id || s.url === cloudServer.url);
         if (!existingServer) {
           // Add server from cloud, preserving the D1 ID
-          await addServer(cloudServer.url, cloudServer.name, undefined, undefined, undefined, { existingId: cloudServer.id });
+          await addServer({ url: cloudServer.url, name: cloudServer.name, existingId: cloudServer.id });
         }
       }
       if (cloudServers.length > 0) {
@@ -182,7 +182,7 @@ export default function Home() {
             if (existingServer) {
               serverId = existingServer.id;
             } else {
-              serverId = await addServer(serverUrl);
+              serverId = await addServer({ url: serverUrl });
             }
           }
 
@@ -202,7 +202,7 @@ export default function Home() {
   }, [addServer, connectServer, pendingOAuthServer, servers]);
 
   const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType, customHeaders?: Record<string, string>): Promise<string> => {
-    const serverId = await addServer(url, name, credentials, transport, customHeaders);
+    const serverId = await addServer({ url, name, credentials, transport, customHeaders });
 
     // Sync to D1 if authenticated
     if (isAuthenticated) {
@@ -252,7 +252,7 @@ export default function Home() {
         };
       }
 
-      const serverId = await addServer(url, name || undefined, credentials, transport);
+      const serverId = await addServer({ url, name: name || undefined, credentials, transport });
 
       // Sync to D1 if authenticated
       if (isAuthenticated) {
