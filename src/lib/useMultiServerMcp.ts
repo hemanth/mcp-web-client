@@ -510,9 +510,9 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     credentials?: OAuthCredentials,
     explicitTransport?: TransportType,
     customHeaders?: Record<string, string>,
-    existingId?: string // Optional: use existing ID (for loading from cloud/D1)
+    options?: { existingId?: string } // Options object for optional params
   ): Promise<string> => {
-    const serverId = existingId || uuidv4();
+    const serverId = options?.existingId || uuidv4();
 
     let serverName = name;
     if (!serverName) {
