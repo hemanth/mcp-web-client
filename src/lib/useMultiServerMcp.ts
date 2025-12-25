@@ -504,15 +504,16 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
   }, []);
 
   // Add a new server
-  const addServer = useCallback(async (
-    url: string,
-    name?: string,
-    credentials?: OAuthCredentials,
-    explicitTransport?: TransportType,
-    customHeaders?: Record<string, string>,
-    options?: { existingId?: string } // Options object for optional params
-  ): Promise<string> => {
-    const serverId = options?.existingId || uuidv4();
+  const addServer = useCallback(async (options: {
+    url: string;
+    name?: string;
+    credentials?: OAuthCredentials;
+    transport?: TransportType;
+    customHeaders?: Record<string, string>;
+    existingId?: string;
+  }): Promise<string> => {
+    const { url, name, credentials, transport, customHeaders, existingId } = options;
+    const serverId = existingId || uuidv4();
 
     let serverName = name;
     if (!serverName) {
@@ -532,7 +533,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       resources: [],
       prompts: [],
       credentials,
-      transport: explicitTransport,
+      transport,
       customHeaders,
     };
 
