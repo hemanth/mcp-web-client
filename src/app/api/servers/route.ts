@@ -72,10 +72,14 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ error: "Server ID required" }, { status: 400 });
     }
 
-    await queryD1(
+    console.log("[DELETE /api/servers] serverId:", id, "userId:", session.user.id);
+
+    const result = await queryD1(
         "DELETE FROM mcp_servers WHERE id = ? AND userId = ?",
         [id, session.user.id]
     );
 
-    return NextResponse.json({ success: true });
+    console.log("[DELETE /api/servers] result:", JSON.stringify(result));
+
+    return NextResponse.json({ success: true, deleted: result });
 }
