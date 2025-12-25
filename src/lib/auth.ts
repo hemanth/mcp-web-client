@@ -27,8 +27,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         signIn: "/login",
     },
     callbacks: {
-        jwt({ token, user }) {
-            if (user) {
+        jwt({ token, user, account }) {
+            // Use GitHub's stable ID from the account profile
+            if (account && account.providerAccountId) {
+                token.id = account.providerAccountId;
+            } else if (user && user.id) {
                 token.id = user.id;
             }
             return token;
