@@ -157,8 +157,8 @@ export default function Home() {
       for (const cloudServer of cloudServers) {
         const existingServer = servers.find(s => s.id === cloudServer.id || s.url === cloudServer.url);
         if (!existingServer) {
-          // Add server from cloud
-          await addServer(cloudServer.url, cloudServer.name);
+          // Add server from cloud, preserving the D1 ID
+          await addServer(cloudServer.url, cloudServer.name, undefined, undefined, undefined, cloudServer.id);
         }
       }
       if (cloudServers.length > 0) {
