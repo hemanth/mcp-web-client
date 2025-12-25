@@ -26,7 +26,6 @@ async function queryD1(sql: string, params: unknown[] = []) {
 // GET user's servers
 export async function GET() {
     const session = await auth();
-    console.log("[GET /api/servers] session.user.id:", session?.user?.id);
     if (!session?.user?.id) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -35,7 +34,6 @@ export async function GET() {
         "SELECT * FROM mcp_servers WHERE userId = ? ORDER BY createdAt DESC",
         [session.user.id]
     );
-    console.log("[GET /api/servers] D1 result:", JSON.stringify(result));
 
     return NextResponse.json({ servers: result.result?.[0]?.results || [] });
 }
