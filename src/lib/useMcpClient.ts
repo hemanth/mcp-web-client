@@ -212,6 +212,117 @@ export function useMcpClient(options: UseMcpClientOptions = {}) {
     }
   }, []);
 
+  // Initialize connection for servers without SSE (direct /mcp POST)
+  const initializeDirectConnection = useCallback(async (serverUrl: string, credentials?: OAuthCredentials) => {
+    console.log('Initializing direct MCP connection to:', serverUrl);
+    setStatus('authenticating');
+
+    // Send initialize request directly to /mcp
+    const initRequest = {
+      jsonrpc: '2.0',
+      id: uuidv4(),
+      method: 'initialize',
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {
+          tools: {},
+          resources: {},
+          prompts: {},
+        },
+        clientInfo: {
+          name: 'MCP Web Client',
+          version: '1.0.0',
+        },
+      },
+    };
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-mcp-server-url': serverUrl,
+    };
+
+    if (credentials) {
+      const tokenType = (credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
+      headers['Authorization'] = `${tokenType} ${credentials.accessToken}`;
+    }
+
+    const response = await fetch('/api/mcp/message', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(initRequest),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to initialize: ${response.status}`);
+    }
+
+    const initResult = await response.json() as {
+      result: {
+        protocolVersion: string;
+        capabilities: MCPCapabilities;
+        serverInfo: MCPServerInfo;
+      };
+    };
+
+    console.log('Direct connection initialized:', initResult);
+
+    // Fetch capabilities
+    const capabilities = initResult.result.capabilities || {};
+    const promises: Promise<{ type: string; result: unknown }>[] = [];
+
+    if (capabilities.tools) {
+      promises.push(
+        sendRequest('tools/list')
+          .then(result => ({ type: 'tools', result }))
+          .catch(() => ({ type: 'tools', result: { tools: [] } }))
+      );
+    }
+    if (capabilities.resources) {
+      promises.push(
+        sendRequest('resources/list')
+          .then(result => ({ type: 'resources', result }))
+          .catch(() => ({ type: 'resources', result: { resources: [] } }))
+      );
+    }
+    if (capabilities.prompts) {
+      promises.push(
+        sendRequest('prompts/list')
+          .then(result => ({ type: 'prompts', result }))
+          .catch(() => ({ type: 'prompts', result: { prompts: [] } }))
+      );
+    }
+
+    const results = await Promise.all(promises);
+
+    let tools: MCPTool[] = [];
+    let resources: MCPResource[] = [];
+    let prompts: MCPPrompt[] = [];
+
+    for (const { type, result } of results) {
+      if (type === 'tools') {
+        tools = (result as { tools: MCPTool[] }).tools || [];
+      } else if (type === 'resources') {
+        resources = (result as { resources: MCPResource[] }).resources || [];
+      } else if (type === 'prompts') {
+        prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
+      }
+    }
+
+    setState(prev => ({
+      ...prev,
+      status: 'connected',
+      serverUrl,
+      serverInfo: initResult.result.serverInfo,
+      capabilities: initResult.result.capabilities,
+      tools,
+      resources,
+      prompts,
+      error: undefined,
+    }));
+
+    options.onConnectionChange?.('connected');
+  }, [sendRequest, setStatus, options]);
+
   // Connect to MCP server
   const connect = useCallback(async (serverUrl: string, credentials?: OAuthCredentials) => {
     // Clean up existing connection
@@ -225,24 +336,33 @@ export function useMcpClient(options: UseMcpClientOptions = {}) {
     setStatus('connecting');
 
     try {
-      // Create SSE connection via proxy
+      // Try SSE endpoint first
       const sseUrl = new URL('/api/mcp/sse', window.location.origin);
 
-      // We need to use a custom EventSource implementation to add headers
-      // For now, we'll use fetch with streaming
       const headers: Record<string, string> = {
         'Accept': 'text/event-stream',
         'x-mcp-server-url': serverUrl,
       };
 
       if (credentials) {
-        // Normalize token type to 'Bearer' (capitalized) as per RFC 6750
         const tokenType = (credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
         headers['Authorization'] = `${tokenType} ${credentials.accessToken}`;
         console.log('SSE connect using auth:', `${tokenType} ${credentials.accessToken?.substring(0, 20)}...`);
       }
 
-      const response = await fetch(sseUrl, { headers });
+      let response = await fetch(sseUrl, { headers });
+
+      // If SSE endpoint doesn't exist (404), the server likely uses direct /mcp
+      if (response.status === 404 || response.status === 405) {
+        console.log('SSE endpoint not found, using direct /mcp communication');
+        // For non-SSE servers, we'll use direct /mcp POST requests
+        // Set a fake endpoint to signal we're in direct mode
+        messageEndpointRef.current = serverUrl;
+
+        // Initialize directly via /mcp
+        await initializeDirectConnection(serverUrl, credentials);
+        return;
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
