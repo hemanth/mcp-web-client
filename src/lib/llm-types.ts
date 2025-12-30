@@ -59,9 +59,12 @@ export const LLM_PROVIDERS: LLMProviderInfo[] = [
     description: 'Gemini Pro and Flash models',
     requiresApiKey: true,
     models: [
-      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', contextWindow: 1000000, supportsTools: true, supportsStreaming: true },
+      { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Experimental)', contextWindow: 1000000, supportsTools: true, supportsStreaming: true },
+      { id: 'gemini-exp-1206', name: 'Gemini Exp 1206', contextWindow: 2000000, supportsTools: true, supportsStreaming: true },
+      { id: 'gemini-2.0-flash-thinking-exp-1219', name: 'Gemini 2.0 Flash Thinking (Exp)', contextWindow: 32000, supportsTools: true, supportsStreaming: true },
       { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', contextWindow: 2000000, supportsTools: true, supportsStreaming: true },
       { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', contextWindow: 1000000, supportsTools: true, supportsStreaming: true },
+      { id: 'gemini-1.5-flash-8b', name: 'Gemini 1.5 Flash-8B', contextWindow: 1000000, supportsTools: true, supportsStreaming: true },
     ],
   },
   {
@@ -169,7 +172,7 @@ export const DEFAULT_LLM_SETTINGS: LLMSettings = {
   providers: {
     openai: { provider: 'openai', model: 'gpt-4o-mini', enabled: false },
     anthropic: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022', enabled: false },
-    gemini: { provider: 'gemini', model: 'gemini-1.5-flash', enabled: false },
+    gemini: { provider: 'gemini', model: 'gemini-2.0-flash-exp', enabled: false },
     ollama: { provider: 'ollama', model: 'llama3.2', baseUrl: 'http://localhost:11434', enabled: false },
   },
 };
