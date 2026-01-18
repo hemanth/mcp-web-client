@@ -143,12 +143,20 @@ function convertMessagesForGemini(messages: ChatMessage[], systemPrompt?: string
 
     if (msg.role === 'tool') {
       // Find the corresponding tool call to get the function name
+      // Gemini expects a structured response, try to parse as JSON or wrap in object
+      let response: unknown;
+      try {
+        response = JSON.parse(msg.content || '{}');
+      } catch {
+        // If content is not valid JSON (e.g., markdown), wrap it as text
+        response = { text: msg.content };
+      }
       contents.push({
         role: 'function',
         parts: [{
           functionResponse: {
             name: msg.toolCallId || 'unknown',
-            response: JSON.parse(msg.content || '{}'),
+            response,
           },
         }],
       });

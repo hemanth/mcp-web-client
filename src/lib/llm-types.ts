@@ -141,6 +141,11 @@ export interface MCPToolDefinition {
   };
   serverId?: string;
   serverName?: string;
+  examples?: Array<{
+    input: Record<string, unknown>;
+    output: string;
+  }>;
+  deferLoading?: boolean;
 }
 
 export interface LLMChatResponse {

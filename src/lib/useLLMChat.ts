@@ -6,10 +6,11 @@ import type {
   ChatMessage,
   ToolCall,
   LLMSettings,
-  MCPToolDefinition,
   LLMChatResponse,
   ToolResultContent,
+  MCPToolDefinition,
 } from './llm-types';
+import { executeOrchestration } from './orchestrator';
 
 const CHAT_HISTORY_KEY = 'mcp-chat-history';
 
@@ -126,10 +127,10 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
             provider: settings.activeProvider,
             model: config.model,
             messages: currentMessages,
-            tools,
+            tools: [...(tools || []), ...getInternalTools(tools || [])].filter(t => !t.deferLoading),
             apiKey: config.apiKey,
             baseUrl: config.baseUrl,
-            systemPrompt: settings.systemPrompt || getDefaultSystemPrompt(tools),
+            systemPrompt: settings.systemPrompt || getDefaultSystemPrompt(tools, true),
           }),
           signal: abortControllerRef.current?.signal,
         });
@@ -150,7 +151,110 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
         if (assistantMessage.toolCalls && assistantMessage.toolCalls.length > 0 && onToolCall) {
           // Process each tool call
           for (const toolCall of assistantMessage.toolCalls) {
-            // Look up the serverId from the tools list
+            // Check for internal tools first
+            if (toolCall.name === 'mcp_tool_search') {
+              const query = (toolCall.arguments.query as string || '').toLowerCase();
+              const matches = (tools || []).filter(t =>
+                t.name.toLowerCase().includes(query) ||
+                t.description?.toLowerCase().includes(query)
+              );
+
+              const result = {
+                content: [{
+                  type: 'text',
+                  text: `Found ${matches.length} tools matching "${query}":\n` +
+                    matches.map(m => `- ${m.name}: ${m.description || 'No description'}`).join('\n')
+                }]
+              };
+
+              // Add tool result message
+              const toolResultMessage: ChatMessage = {
+                id: uuidv4(),
+                role: 'tool',
+                content: result.content[0].text,
+                timestamp: Date.now(),
+                toolCallId: toolCall.id,
+              };
+              setMessages(prev => [...prev, toolResultMessage]);
+              currentMessages = [...currentMessages, toolResultMessage];
+              continue;
+            }
+
+            if (toolCall.name === 'javascript_orchestrator') {
+              const code = toolCall.arguments.code as string;
+
+              // Update status to running
+              setMessages(prev => prev.map(m =>
+                m.id === assistantMessage.id && m.toolCalls
+                  ? {
+                    ...m,
+                    toolCalls: m.toolCalls?.map(tc =>
+                      tc.id === toolCall.id ? { ...tc, status: 'running' as const } : tc
+                    ),
+                  }
+                  : m
+              ));
+
+              try {
+                const orchResult = await executeOrchestration(code, {
+                  callTool: async (name, args) => {
+                    const tDef = tools?.find(t => t.name === name);
+                    // Create a tool call object for recursive calling
+                    const subToolCall: ToolCall = {
+                      id: uuidv4(),
+                      name,
+                      arguments: args,
+                      serverId: tDef?.serverId,
+                      status: 'running'
+                    };
+                    return await onToolCall(subToolCall);
+                  },
+                  log: (...args) => console.log('[Orchestrator]', ...args)
+                });
+
+                const resultText = orchResult.error
+                  ? `Execution failed: ${orchResult.error}\nLogs:\n${orchResult.stdout}`
+                  : `Execution successful.\nLogs:\n${orchResult.stdout}`;
+
+                const toolResultMessage: ChatMessage = {
+                  id: uuidv4(),
+                  role: 'tool',
+                  content: resultText,
+                  timestamp: Date.now(),
+                  toolCallId: toolCall.id,
+                };
+
+                // Update status to completed
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantMessage.id && m.toolCalls
+                    ? {
+                      ...m,
+                      toolCalls: m.toolCalls?.map(tc =>
+                        tc.id === toolCall.id ? { ...tc, status: 'completed' as const, result: orchResult } : tc
+                      ),
+                    }
+                    : m
+                ));
+
+                setMessages(prev => [...prev, toolResultMessage]);
+                currentMessages = [...currentMessages, toolResultMessage];
+                continue;
+              } catch (orchErr) {
+                const errorMessage = orchErr instanceof Error ? orchErr.message : 'Orchestration failed';
+                const toolResultMessage: ChatMessage = {
+                  id: uuidv4(),
+                  role: 'tool',
+                  content: `Error: ${errorMessage}`,
+                  timestamp: Date.now(),
+                  toolCallId: toolCall.id,
+                };
+                setMessages(prev => [...prev, toolResultMessage]);
+                currentMessages = [...currentMessages, toolResultMessage];
+                continue;
+              }
+            }
+
+            // Normal MCP tool handling
             const toolDef = tools?.find(t => t.name === toolCall.name);
             const toolCallWithServer = { ...toolCall, serverId: toolDef?.serverId };
 
@@ -158,11 +262,11 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
             setMessages(prev => prev.map(m =>
               m.id === assistantMessage.id && m.toolCalls
                 ? {
-                    ...m,
-                    toolCalls: m.toolCalls?.map(tc =>
-                      tc.id === toolCall.id ? { ...tc, status: 'running' as const } : tc
-                    ),
-                  }
+                  ...m,
+                  toolCalls: m.toolCalls?.map(tc =>
+                    tc.id === toolCall.id ? { ...tc, status: 'running' as const } : tc
+                  ),
+                }
                 : m
             ));
 
@@ -174,13 +278,13 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
               setMessages(prev => prev.map(m =>
                 m.id === assistantMessage.id && m.toolCalls
                   ? {
-                      ...m,
-                      toolCalls: m.toolCalls?.map(tc =>
-                        tc.id === toolCall.id
-                          ? { ...tc, status: 'completed' as const, result }
-                          : tc
-                      ),
-                    }
+                    ...m,
+                    toolCalls: m.toolCalls?.map(tc =>
+                      tc.id === toolCall.id
+                        ? { ...tc, status: 'completed' as const, result }
+                        : tc
+                    ),
+                  }
                   : m
               ));
 
@@ -223,13 +327,13 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
               setMessages(prev => prev.map(m =>
                 m.id === assistantMessage.id && m.toolCalls
                   ? {
-                      ...m,
-                      toolCalls: m.toolCalls?.map(tc =>
-                        tc.id === toolCall.id
-                          ? { ...tc, status: 'error' as const, error: errorMessage }
-                          : tc
-                      ),
-                    }
+                    ...m,
+                    toolCalls: m.toolCalls?.map(tc =>
+                      tc.id === toolCall.id
+                        ? { ...tc, status: 'error' as const, error: errorMessage }
+                        : tc
+                    ),
+                  }
                   : m
               ));
 
@@ -300,17 +404,68 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
   };
 }
 
-function getDefaultSystemPrompt(tools?: MCPToolDefinition[]): string {
+function getDefaultSystemPrompt(tools?: MCPToolDefinition[], useAdvancedTools: boolean = false): string {
   let prompt = `You are a helpful AI assistant integrated with MCP (Model Context Protocol) servers. You can help users interact with connected MCP servers and their tools.`;
+
+  if (useAdvancedTools) {
+    prompt += `\n\n### Advanced Tool Use
+You have access to a large library of tools. To optimize performance and context, some tools are deferred.
+Use 'mcp_tool_search' to find tools for specific tasks (e.g., searching for "github" or "database").
+Use 'javascript_orchestrator' for complex workflows that require loops, multiple tool calls, or data processing. The orchestrator can execute JS code and use 'await mcp.callTool(name, args)' and 'mcp.log(message)'.`;
+  }
 
   if (tools && tools.length > 0) {
     prompt += `\n\nYou have access to the following tools from connected MCP servers. Use them when appropriate to help the user:\n`;
     for (const tool of tools) {
       prompt += `\n- ${tool.name}${tool.serverName ? ` (from ${tool.serverName})` : ''}: ${tool.description || 'No description'}`;
+      if (tool.examples && tool.examples.length > 0) {
+        prompt += `\n  Examples:`;
+        for (const ex of tool.examples) {
+          prompt += `\n    Input: ${JSON.stringify(ex.input)}`;
+          prompt += `\n    Output: ${ex.output}`;
+        }
+      }
     }
   }
 
   prompt += `\n\nWhen using tools, explain what you're doing and interpret the results for the user.`;
 
   return prompt;
+}
+
+function getInternalTools(tools: MCPToolDefinition[]): MCPToolDefinition[] {
+  const internal: MCPToolDefinition[] = [
+    {
+      name: 'javascript_orchestrator',
+      description: 'Execute JavaScript code to coordinate multiple MCP tool calls. Use "await mcp.callTool(name, args)" and "mcp.log(message)". Efficient for loops and parallel work.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            description: 'The JS code to execute.'
+          }
+        },
+        required: ['code']
+      }
+    }
+  ];
+
+  // Always include the tool search capability
+  internal.push({
+    name: 'mcp_tool_search',
+    description: 'Search for tools in the full MCP tool library by name or description. Use this to discover available tools.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The search term (e.g., "github", "search", "documents").'
+        }
+      },
+      required: ['query']
+    }
+  });
+
+  return internal;
 }
