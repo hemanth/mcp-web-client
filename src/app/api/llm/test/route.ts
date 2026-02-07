@@ -5,6 +5,19 @@ import type { LLMProvider } from '@/lib/llm-types';
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
+const LLM_KEYS_COOKIE = 'mcp-llm-keys';
+
+function getApiKeyFromCookie(request: NextRequest, provider: string): { apiKey?: string; baseUrl?: string } {
+  const cookie = request.cookies.get(LLM_KEYS_COOKIE);
+  if (!cookie?.value) return {};
+  try {
+    const keys = JSON.parse(atob(cookie.value));
+    return keys[provider] || {};
+  } catch {
+    return {};
+  }
+}
+
 interface TestRequest {
   provider: LLMProvider;
   model: string;
@@ -55,7 +68,12 @@ async function testOllama(baseUrl: string): Promise<boolean> {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as TestRequest;
-    const { provider, apiKey, baseUrl } = body;
+    const { provider } = body;
+
+    // Resolve API key from cookie if not in body
+    const cookieKeys = getApiKeyFromCookie(request, provider);
+    const apiKey = body.apiKey || cookieKeys.apiKey;
+    const baseUrl = body.baseUrl || cookieKeys.baseUrl;
 
     let success = false;
 

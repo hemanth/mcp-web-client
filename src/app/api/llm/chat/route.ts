@@ -5,13 +5,26 @@ import type { LLMProvider, ChatMessage, MCPToolDefinition, ToolCall } from '@/li
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
+const LLM_KEYS_COOKIE = 'mcp-llm-keys';
+
+function getApiKeyFromCookie(request: NextRequest, provider: string): { apiKey?: string; baseUrl?: string } {
+  const cookie = request.cookies.get(LLM_KEYS_COOKIE);
+  if (!cookie?.value) return {};
+  try {
+    const keys = JSON.parse(atob(cookie.value));
+    return keys[provider] || {};
+  } catch {
+    return {};
+  }
+}
+
 interface ChatRequest {
   provider: LLMProvider;
   model: string;
   messages: ChatMessage[];
   tools?: MCPToolDefinition[];
   stream?: boolean;
-  apiKey?: string;
+  apiKey?: string; // deprecated: prefer cookie-based keys
   baseUrl?: string;
   systemPrompt?: string;
 }
@@ -535,6 +548,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as ChatRequest;
     const { provider } = body;
+
+    // Resolve API key: prefer server-side cookie, fall back to request body for backward compat
+    const cookieKeys = getApiKeyFromCookie(request, provider);
+    if (cookieKeys.apiKey && !body.apiKey) {
+      body.apiKey = cookieKeys.apiKey;
+    }
+    if (cookieKeys.baseUrl && !body.baseUrl) {
+      body.baseUrl = cookieKeys.baseUrl;
+    }
 
     switch (provider) {
       case 'openai':
