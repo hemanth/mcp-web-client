@@ -86,10 +86,7 @@ export async function POST(request: NextRequest) {
     };
     setOAuthState(state, oauthStateData);
 
-    console.log(`Generated auth URL: ${authUrl}`);
-    console.log(`Redirect URI: ${redirectUri}`);
-
-    // Also store state in a cookie for persistence across server restarts
+    // Store state in a cookie for persistence across edge isolates
     const cookieStore = await cookies();
     cookieStore.set(`oauth_state_${state}`, JSON.stringify(oauthStateData), {
       httpOnly: true,
@@ -103,8 +100,6 @@ export async function POST(request: NextRequest) {
       requiresAuth: true,
       authUrl,
       state,
-      clientId: effectiveClientId,
-      clientSecret: effectiveClientSecret,
       metadata,
     });
   } catch (error) {
