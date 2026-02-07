@@ -83,36 +83,36 @@ function AuthCallbackContent() {
   }, [searchParams]);
 
   return (
-    <div className="max-w-md w-full p-8 bg-white rounded-lg shadow-lg text-center">
+    <div className="max-w-md w-full p-8 bg-[var(--background-secondary)] rounded-xl border border-[var(--border)] text-center">
       {status === 'processing' && (
         <>
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">{message}</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)] mx-auto mb-4" />
+          <p className="text-[var(--foreground-muted)]">{message}</p>
         </>
       )}
 
       {status === 'success' && (
         <>
-          <div className="h-12 w-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="h-12 w-12 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="h-6 w-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <p className="text-green-600 font-medium">{message}</p>
+          <p className="text-green-400 font-medium">{message}</p>
         </>
       )}
 
       {status === 'error' && (
         <>
-          <div className="h-12 w-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="h-12 w-12 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="h-6 w-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </div>
-          <p className="text-red-600 font-medium">{message}</p>
+          <p className="text-red-400 font-medium">{message}</p>
           <button
             onClick={() => window.close()}
-            className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition-colors"
+            className="mt-4 px-4 py-2 bg-[var(--background-tertiary)] text-[var(--foreground)] rounded-lg hover:bg-[var(--border)] transition-colors"
           >
             Close Window
           </button>
@@ -124,16 +124,16 @@ function AuthCallbackContent() {
 
 function LoadingFallback() {
   return (
-    <div className="max-w-md w-full p-8 bg-white rounded-lg shadow-lg text-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-      <p className="text-gray-600">Loading...</p>
+    <div className="max-w-md w-full p-8 bg-[var(--background-secondary)] rounded-xl border border-[var(--border)] text-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)] mx-auto mb-4" />
+      <p className="text-[var(--foreground-muted)]">Loading...</p>
     </div>
   );
 }
 
 export default function AuthCallbackPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--background)]">
       <Suspense fallback={<LoadingFallback />}>
         <AuthCallbackContent />
       </Suspense>
