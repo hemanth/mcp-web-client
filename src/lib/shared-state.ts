@@ -1,4 +1,8 @@
 // Server-side shared state for OAuth flow
+// NOTE: In edge/serverless environments, in-memory state is ephemeral.
+// Cookie-based persistence in connect/route.ts and callback/route.ts
+// is the primary storage mechanism. This in-memory store serves as a
+// fast-path cache within the same isolate only.
 
 interface OAuthState {
   serverUrl: string;
@@ -15,7 +19,7 @@ interface ClientRegistration {
   serverUrl: string;
 }
 
-// In-memory state storage (use Redis/database in production)
+// In-memory cache (fast-path only, not durable across isolates)
 const oauthStates = new Map<string, OAuthState>();
 const clientRegistrations = new Map<string, ClientRegistration>();
 
