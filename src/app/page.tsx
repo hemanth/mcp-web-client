@@ -6,13 +6,15 @@ import { useSession } from 'next-auth/react';
 import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
 import { useOAuth } from '@/lib/useOAuth';
 import { useServerSync } from '@/lib/useServerSync';
+import { useSamplingFlow } from '@/lib/useSamplingFlow';
+import { useElicitationFlow } from '@/lib/useElicitationFlow';
 import { ServerList, AddServerModal } from '@/components/ServerList';
 import { ServerInfo } from '@/components/ServerInfo';
 import { SamplingModal } from '@/components/SamplingModal';
 import { ElicitationModal } from '@/components/ElicitationModal';
 import { useLLMSettings } from '@/components/LLMSettings';
 import { UserMenu } from '@/components/UserMenu';
-import type { OAuthCredentials, TransportType, SamplingRequest, CreateMessageResult, ElicitationRequest, ElicitResult } from '@/lib/types';
+import type { OAuthCredentials, TransportType, SamplingRequest, ElicitationRequest } from '@/lib/types';
 import {
   MessageSquare,
   Wrench,
@@ -102,14 +104,6 @@ export default function Home() {
   const [showAddServerModal, setShowAddServerModal] = useState(false);
   const [isAddingServer, setIsAddingServer] = useState(false);
 
-  // Sampling state
-  const [pendingSamplingRequest, setPendingSamplingRequest] = useState<SamplingRequest | null>(null);
-  const [isSamplingProcessing, setIsSamplingProcessing] = useState(false);
-  const [samplingResult, setSamplingResult] = useState<{ success: boolean; content?: string; error?: string } | undefined>();
-
-  // Elicitation state
-  const [pendingElicitationRequest, setPendingElicitationRequest] = useState<ElicitationRequest | null>(null);
-
   // LLM settings for sampling
   const { settings: llmSettings } = useLLMSettings();
 
@@ -117,6 +111,10 @@ export default function Home() {
     registerClient,
     startOAuth,
   } = useOAuth();
+
+  // These refs will be set after useMultiServerMcp — use temp callbacks
+  const samplingFlowRef = { current: null as ReturnType<typeof useSamplingFlow> | null };
+  const elicitationFlowRef = { current: null as ReturnType<typeof useElicitationFlow> | null };
 
   const {
     servers,
@@ -140,15 +138,25 @@ export default function Home() {
       toast.error(error.message);
     }, []),
     onSamplingRequest: useCallback((request: SamplingRequest) => {
-      console.log('Received sampling request:', request);
-      setPendingSamplingRequest(request);
-      setSamplingResult(undefined);
+      samplingFlowRef.current?.onSamplingRequest(request);
     }, []),
     onElicitationRequest: useCallback((request: ElicitationRequest) => {
-      console.log('Received elicitation request:', request);
-      setPendingElicitationRequest(request);
+      elicitationFlowRef.current?.onElicitationRequest(request);
     }, []),
   });
+
+  // Sampling flow (extracted hook)
+  const samplingFlow = useSamplingFlow({
+    respondToSamplingRequest,
+    llmSettings,
+  });
+  samplingFlowRef.current = samplingFlow;
+
+  // Elicitation flow (extracted hook)
+  const elicitationFlow = useElicitationFlow({
+    respondToElicitationRequest,
+  });
+  elicitationFlowRef.current = elicitationFlow;
 
   // Server sync with D1 database
   const { saveServer, deleteServer: deleteServerFromDb, isAuthenticated } = useServerSync({
@@ -306,137 +314,6 @@ export default function Home() {
     // Fallback to active server if no serverId provided
     return await callTool(name, args);
   }, [callTool, callToolOnServer]);
-
-  // Handler for approving sampling requests
-  const handleApproveSampling = useCallback(async () => {
-    if (!pendingSamplingRequest) return;
-
-    // Check if LLM is configured
-    if (!llmSettings.activeProvider) {
-      toast.error('No LLM provider configured. Please configure one in Chat settings.');
-      return;
-    }
-
-    const providerConfig = llmSettings.providers[llmSettings.activeProvider];
-    if (!providerConfig) {
-      toast.error('LLM provider configuration not found.');
-      return;
-    }
-
-    setIsSamplingProcessing(true);
-    try {
-      // Convert MCP sampling messages to LLM chat format
-      const messages = pendingSamplingRequest.params.messages.map(msg => {
-        const content = Array.isArray(msg.content)
-          ? msg.content.map(c => c.type === 'text' ? c.text : '').join('\n')
-          : msg.content.type === 'text' ? msg.content.text : '';
-        return {
-          role: msg.role,
-          content,
-        };
-      });
-
-      // Call the LLM API with the user's configured provider
-      const response = await fetch('/api/llm/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: llmSettings.activeProvider,
-          model: providerConfig.model,
-          messages,
-          systemPrompt: pendingSamplingRequest.params.systemPrompt,
-          apiKey: providerConfig.apiKey,
-          baseUrl: providerConfig.baseUrl,
-          stream: false,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'LLM request failed');
-      }
-
-      const data = await response.json();
-      const resultContent = data.message?.content || '';
-
-      // Send the result back to the MCP server
-      const result: CreateMessageResult = {
-        role: 'assistant',
-        content: { type: 'text', text: resultContent },
-        model: providerConfig.model,
-        stopReason: 'endTurn',
-      };
-
-      await respondToSamplingRequest(
-        pendingSamplingRequest.serverId,
-        pendingSamplingRequest.id,
-        result
-      );
-
-      setSamplingResult({ success: true, content: resultContent });
-      toast.success('Sampling request completed');
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setSamplingResult({ success: false, error: errorMessage });
-
-      // Send error response to server
-      await respondToSamplingRequest(
-        pendingSamplingRequest.serverId,
-        pendingSamplingRequest.id,
-        { error: { code: -32000, message: errorMessage } }
-      );
-
-      toast.error(`Sampling failed: ${errorMessage}`);
-    } finally {
-      setIsSamplingProcessing(false);
-    }
-  }, [pendingSamplingRequest, respondToSamplingRequest, llmSettings]);
-
-  // Handler for denying sampling requests
-  const handleDenySampling = useCallback(async () => {
-    if (!pendingSamplingRequest) return;
-
-    await respondToSamplingRequest(
-      pendingSamplingRequest.serverId,
-      pendingSamplingRequest.id,
-      { error: { code: -32001, message: 'User denied sampling request' } }
-    );
-
-    setPendingSamplingRequest(null);
-    setSamplingResult(undefined);
-    toast.info('Sampling request denied');
-  }, [pendingSamplingRequest, respondToSamplingRequest]);
-
-  // Handler for submitting elicitation results
-  const handleElicitationSubmit = useCallback(async (result: ElicitResult) => {
-    if (!pendingElicitationRequest) return;
-
-    await respondToElicitationRequest(
-      pendingElicitationRequest.serverId,
-      pendingElicitationRequest.id,
-      result
-    );
-
-    setPendingElicitationRequest(null);
-
-    if (result.action === 'accept') {
-      toast.success('Response submitted successfully');
-    } else if (result.action === 'decline') {
-      toast.info('Request declined');
-    } else {
-      toast.info('Request cancelled');
-    }
-  }, [pendingElicitationRequest, respondToElicitationRequest]);
-
-  // Handler for declining elicitation
-  const handleElicitationDecline = useCallback(() => {
-    setPendingElicitationRequest(null);
-  }, []);
-
-  // Handler for cancelling elicitation
-  const handleElicitationCancel = useCallback(() => {
-    setPendingElicitationRequest(null);
-  }, []);
 
   // Tools for the active server (for the Tools panel)
   const currentTools = activeServer?.tools || [];
@@ -733,7 +610,7 @@ export default function Home() {
                   key={item.id}
                   onClick={() => setActivePanel(item.id)}
                   disabled={disabled}
-                  className={`flex-1 flex flex-col items-center gap-1 py-2 text-xs ${isActive
+                  className={`relative flex-1 flex flex-col items-center gap-1 py-2 text-xs ${isActive
                     ? 'text-[var(--accent)]'
                     : 'text-[var(--foreground-muted)]'
                     } ${disabled ? 'opacity-50' : ''}`}
@@ -741,7 +618,7 @@ export default function Home() {
                   <Icon className="w-5 h-5" />
                   <span>{item.label}</span>
                   {item.count !== null && item.count > 0 && (
-                    <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full text-[10px] flex items-center justify-center ${isActive ? 'bg-[var(--accent)] text-white' : 'bg-[var(--background-tertiary)]'
+                    <span className={`absolute top-0.5 right-1/4 w-4 h-4 rounded-full text-[10px] flex items-center justify-center ${isActive ? 'bg-[var(--accent)] text-white' : 'bg-[var(--background-tertiary)]'
                       }`}>
                       {item.count}
                     </span>
@@ -774,23 +651,23 @@ export default function Home() {
       )}
 
       {/* Sampling Request Modal */}
-      {pendingSamplingRequest && (
+      {samplingFlow.pendingRequest && (
         <SamplingModal
-          request={pendingSamplingRequest}
-          onApprove={handleApproveSampling}
-          onDeny={handleDenySampling}
-          isProcessing={isSamplingProcessing}
-          result={samplingResult}
+          request={samplingFlow.pendingRequest}
+          onApprove={samplingFlow.handleApprove}
+          onDeny={samplingFlow.handleDeny}
+          isProcessing={samplingFlow.isProcessing}
+          result={samplingFlow.result}
         />
       )}
 
       {/* Elicitation Request Modal */}
-      {pendingElicitationRequest && (
+      {elicitationFlow.pendingRequest && (
         <ElicitationModal
-          request={pendingElicitationRequest}
-          onSubmit={handleElicitationSubmit}
-          onDecline={handleElicitationDecline}
-          onCancel={handleElicitationCancel}
+          request={elicitationFlow.pendingRequest}
+          onSubmit={elicitationFlow.handleSubmit}
+          onDecline={elicitationFlow.handleDecline}
+          onCancel={elicitationFlow.handleCancel}
         />
       )}
     </div>
