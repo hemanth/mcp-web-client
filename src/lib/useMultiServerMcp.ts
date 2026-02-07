@@ -133,7 +133,9 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
 
   const connectionsRef = useRef<Map<string, ServerConnection>>(new Map());
   const autoConnectAttemptedRef = useRef<Set<string>>(new Set());
-  const serversToAutoConnectRef = useRef<Set<string>>(new Set()); // Track servers that should auto-connect
+  const serversToAutoConnectRef = useRef<Set<string>>(new Set());
+  const reconnectAttemptsRef = useRef<Map<string, number>>(new Map());
+  const reconnectTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   // Load servers from localStorage on mount
   useEffect(() => {
@@ -549,6 +551,40 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     return serverId;
   }, []);
 
+  // Schedule reconnection with exponential backoff (max 5 attempts, max 30s delay)
+  const scheduleReconnect = useCallback((serverId: string) => {
+    const attempts = reconnectAttemptsRef.current.get(serverId) || 0;
+    const MAX_ATTEMPTS = 5;
+    if (attempts >= MAX_ATTEMPTS) {
+      reconnectAttemptsRef.current.delete(serverId);
+      updateServer(serverId, { status: 'error', error: 'Reconnection failed after max attempts' });
+      options.onError?.(serverId, new Error('Reconnection failed after max attempts'));
+      return;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+    reconnectAttemptsRef.current.set(serverId, attempts + 1);
+
+    const timer = setTimeout(async () => {
+      reconnectTimersRef.current.delete(serverId);
+      const server = servers.find(s => s.id === serverId);
+      if (!server || server.status === 'connected') return;
+
+      try {
+        await connectServerRef.current?.(serverId, server.credentials);
+        reconnectAttemptsRef.current.delete(serverId);
+      } catch {
+        // connectServer already updates error state; scheduleReconnect will be
+        // called again from the processStream error handler if needed
+      }
+    }, delay);
+
+    reconnectTimersRef.current.set(serverId, timer);
+  }, [servers, updateServer, options]);
+
+  // Forward ref to connectServer for reconnection
+  const connectServerRef = useRef<((serverId: string, credentials?: OAuthCredentials) => Promise<void>) | null>(null);
+
   // Connect to a server
   const connectServer = useCallback(async (serverId: string, credentials?: OAuthCredentials) => {
     const server = servers.find(s => s.id === serverId);
@@ -655,8 +691,9 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
             if (!(error instanceof Error && error.name === 'AbortError')) {
               const currentServer = servers.find(s => s.id === serverId);
               if (currentServer?.status === 'connected') {
-                updateServer(serverId, { status: 'error', error: 'Connection lost' });
-                options.onError?.(serverId, new Error('Connection lost'));
+                updateServer(serverId, { status: 'error', error: 'Connection lost, reconnecting...' });
+                // Auto-reconnect with exponential backoff
+                scheduleReconnect(serverId);
               }
             }
           }
@@ -778,9 +815,20 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     }
   }, [servers, activeServerId, updateServer, sendRequest, sendNotification, createMessageHandler, createEndpointHandler, options]);
 
+  // Keep connectServerRef in sync for reconnection
+  connectServerRef.current = connectServer;
+
   // Disconnect a server
   const disconnectServer = useCallback((serverId: string) => {
     const connection = connectionsRef.current.get(serverId);
+
+    // Cancel any pending reconnect
+    const reconnectTimer = reconnectTimersRef.current.get(serverId);
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimersRef.current.delete(serverId);
+    }
+    reconnectAttemptsRef.current.delete(serverId);
 
     if (connection) {
       connection.abortController?.abort();
