@@ -68,7 +68,52 @@ export function useOAuth() {
     });
   }, []);
 
-  // Get credentials for a server
+  // Get client registration for a server
+  const getClientRegistration = useCallback((serverUrl: string): StoredClientRegistration | undefined => {
+    const normalizedUrl = serverUrl.replace(/\/sse$/, '');
+    return clientRegistrations.get(normalizedUrl);
+  }, [clientRegistrations]);
+
+  // Refresh an expired token
+  const refreshToken = useCallback(async (serverUrl: string): Promise<OAuthCredentials | undefined> => {
+    const normalizedUrl = serverUrl.replace(/\/sse$/, '');
+    const stored = credentials.get(normalizedUrl);
+    if (!stored?.credentials.refreshToken) return undefined;
+
+    const registration = getClientRegistration(normalizedUrl);
+    if (!registration) return undefined;
+
+    try {
+      // Discover token endpoint
+      const { discoverOAuthMetadata, refreshAccessToken } = await import('./oauth');
+      const baseUrl = normalizedUrl.replace(/\/(sse|mcp)\/?$/, '');
+      const metadata = await discoverOAuthMetadata(baseUrl);
+      const tokenEndpoint = metadata?.token_endpoint || `${baseUrl}/token`;
+
+      const tokens = await refreshAccessToken(
+        tokenEndpoint,
+        stored.credentials.refreshToken,
+        registration.clientId,
+        registration.clientSecret
+      );
+
+      const newCredentials: OAuthCredentials = {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token || stored.credentials.refreshToken,
+        tokenType: tokens.token_type,
+        expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : undefined,
+        scope: tokens.scope,
+      };
+
+      saveCredentials(normalizedUrl, newCredentials);
+      return newCredentials;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      return undefined;
+    }
+  }, [credentials, getClientRegistration, saveCredentials]);
+
+  // Get credentials for a server, auto-refreshing if expired
   const getCredentials = useCallback((serverUrl: string): OAuthCredentials | undefined => {
     // Normalize URL - remove /sse suffix if present
     const normalizedUrl = serverUrl.replace(/\/sse$/, '');
@@ -76,13 +121,14 @@ export function useOAuth() {
     if (stored) {
       // Check if token is expired
       if (stored.credentials.expiresAt && Date.now() > stored.credentials.expiresAt) {
-        // Token expired - would need refresh logic here
+        // Token expired — trigger async refresh, return undefined for now
+        refreshToken(serverUrl);
         return undefined;
       }
       return stored.credentials;
     }
     return undefined;
-  }, [credentials]);
+  }, [credentials, refreshToken]);
 
   // Clear credentials for a server
   const clearCredentials = useCallback((serverUrl: string) => {
@@ -144,12 +190,6 @@ export function useOAuth() {
       return next;
     });
   }, []);
-
-  // Get client registration for a server
-  const getClientRegistration = useCallback((serverUrl: string): StoredClientRegistration | undefined => {
-    const normalizedUrl = serverUrl.replace(/\/sse$/, '');
-    return clientRegistrations.get(normalizedUrl);
-  }, [clientRegistrations]);
 
   // Register client with server (dynamic registration)
   const registerClient = useCallback(async (serverUrl: string): Promise<{ success: boolean; clientId?: string; clientSecret?: string; requiresDirectAuth?: boolean; authUrl?: string; error?: string }> => {
@@ -289,5 +329,6 @@ export function useOAuth() {
     registerClient,
     startOAuth,
     setBearerToken,
+    refreshToken,
   };
 }
