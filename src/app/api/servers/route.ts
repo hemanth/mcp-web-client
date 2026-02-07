@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 
 // D1 REST API for server configs
 const D1_ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
-const D1_DATABASE_ID = "7e44ef49-05ba-40d7-b1d6-10094104ae0f";
+const D1_DATABASE_ID = process.env.CF_D1_DATABASE_ID;
 const D1_API_TOKEN = process.env.CF_API_TOKEN;
 
 async function queryD1(sql: string, params: unknown[] = []) {
