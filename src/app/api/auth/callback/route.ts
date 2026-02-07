@@ -113,13 +113,6 @@ export async function GET(request: NextRequest) {
       ? Date.now() + tokens.expires_in * 1000
       : undefined;
 
-    console.log('Token exchange successful:');
-    console.log('  access_token preview:', tokens.access_token?.substring(0, 30) + '...');
-    console.log('  token_type:', tokens.token_type);
-    console.log('  scope:', tokens.scope);
-    console.log('  expires_in:', tokens.expires_in);
-    console.log('  full token response:', JSON.stringify(tokens, null, 2));
-
     // Return tokens as JSON (the callback page will handle storage)
     return NextResponse.json({
       success: true,
