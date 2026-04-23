@@ -32,6 +32,57 @@ export interface LLMModelInfo {
 // Provider definitions with available models
 export const LLM_PROVIDERS: LLMProviderInfo[] = [
   {
+    id: 'custom',
+    name: 'Custom Endpoint',
+    description: 'Any OpenAI-compatible API endpoint',
+    requiresApiKey: false,
+    models: [
+      { id: 'custom', name: 'Custom Model', supportsTools: true, supportsStreaming: true },
+    ],
+  },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA NIM',
+    description: 'NVIDIA hosted models via build.nvidia.com',
+    requiresApiKey: true,
+    apiKeyUrl: 'https://build.nvidia.com/explore/discover',
+    defaultBaseUrl: 'https://integrate.api.nvidia.com/v1',
+    models: [
+      // Meta Llama
+      { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'meta/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick 17B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'meta/llama-3.1-405b-instruct', name: 'Llama 3.1 405B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'meta/llama-3.1-70b-instruct', name: 'Llama 3.1 70B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'meta/llama-3.1-8b-instruct', name: 'Llama 3.1 8B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      // NVIDIA Nemotron
+      { id: 'nvidia/llama-3.3-nemotron-super-49b-v1.5', name: 'Nemotron Super 49B v1.5', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Nemotron 70B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'nvidia/nemotron-3-super-120b-a12b', name: 'Nemotron 3 Super 120B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'nvidia/nvidia-nemotron-nano-9b-v2', name: 'Nemotron Nano 9B v2', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      // Mistral
+      { id: 'mistralai/mistral-large-3-675b-instruct-2512', name: 'Mistral Large 3 675B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'mistralai/mistral-large-2-instruct', name: 'Mistral Large 2', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'mistralai/mistral-medium-3-instruct', name: 'Mistral Medium 3', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      // DeepSeek
+      { id: 'deepseek-ai/deepseek-v3.2', name: 'DeepSeek V3.2', contextWindow: 65536, supportsTools: false, supportsStreaming: true },
+      { id: 'deepseek-ai/deepseek-v3.1-terminus', name: 'DeepSeek V3.1 Terminus', contextWindow: 65536, supportsTools: false, supportsStreaming: true },
+      // Qwen
+      { id: 'qwen/qwen3.5-397b-a17b', name: 'Qwen 3.5 397B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'qwen/qwen3.5-122b-a10b', name: 'Qwen 3.5 122B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'qwen/qwen3-coder-480b-a35b-instruct', name: 'Qwen 3 Coder 480B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      // Google
+      { id: 'google/gemma-4-31b-it', name: 'Gemma 4 31B', contextWindow: 131072, supportsTools: false, supportsStreaming: true },
+      { id: 'google/gemma-3-27b-it', name: 'Gemma 3 27B', contextWindow: 131072, supportsTools: false, supportsStreaming: true },
+      // Moonshot
+      { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'moonshotai/kimi-k2-instruct', name: 'Kimi K2 Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      // Others
+      { id: 'microsoft/phi-4-mini-instruct', name: 'Phi-4 Mini', contextWindow: 16384, supportsTools: false, supportsStreaming: true },
+      { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'z-ai/glm-5.1', name: 'GLM 5.1', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+    ],
+  },
+  {
     id: 'openai',
     name: 'OpenAI',
     description: 'GPT-5.4 and reasoning models',
@@ -93,57 +144,6 @@ export const LLM_PROVIDERS: LLMProviderInfo[] = [
       { id: 'qwen2.5-coder', name: 'Qwen 2.5 Coder', supportsTools: true, supportsStreaming: true },
       { id: 'phi4', name: 'Phi-4', supportsTools: false, supportsStreaming: true },
       { id: 'deepseek-r1', name: 'DeepSeek R1', supportsTools: false, supportsStreaming: true },
-    ],
-  },
-  {
-    id: 'nvidia',
-    name: 'NVIDIA NIM',
-    description: 'NVIDIA hosted models via build.nvidia.com',
-    requiresApiKey: true,
-    apiKeyUrl: 'https://build.nvidia.com/explore/discover',
-    defaultBaseUrl: 'https://integrate.api.nvidia.com/v1',
-    models: [
-      // Meta Llama
-      { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'meta/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick 17B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'meta/llama-3.1-405b-instruct', name: 'Llama 3.1 405B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'meta/llama-3.1-70b-instruct', name: 'Llama 3.1 70B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'meta/llama-3.1-8b-instruct', name: 'Llama 3.1 8B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      // NVIDIA Nemotron
-      { id: 'nvidia/llama-3.3-nemotron-super-49b-v1.5', name: 'Nemotron Super 49B v1.5', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Nemotron 70B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'nvidia/nemotron-3-super-120b-a12b', name: 'Nemotron 3 Super 120B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'nvidia/nvidia-nemotron-nano-9b-v2', name: 'Nemotron Nano 9B v2', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      // Mistral
-      { id: 'mistralai/mistral-large-3-675b-instruct-2512', name: 'Mistral Large 3 675B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'mistralai/mistral-large-2-instruct', name: 'Mistral Large 2', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'mistralai/mistral-medium-3-instruct', name: 'Mistral Medium 3', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      // DeepSeek
-      { id: 'deepseek-ai/deepseek-v3.2', name: 'DeepSeek V3.2', contextWindow: 65536, supportsTools: false, supportsStreaming: true },
-      { id: 'deepseek-ai/deepseek-v3.1-terminus', name: 'DeepSeek V3.1 Terminus', contextWindow: 65536, supportsTools: false, supportsStreaming: true },
-      // Qwen
-      { id: 'qwen/qwen3.5-397b-a17b', name: 'Qwen 3.5 397B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'qwen/qwen3.5-122b-a10b', name: 'Qwen 3.5 122B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'qwen/qwen3-coder-480b-a35b-instruct', name: 'Qwen 3 Coder 480B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      // Google
-      { id: 'google/gemma-4-31b-it', name: 'Gemma 4 31B', contextWindow: 131072, supportsTools: false, supportsStreaming: true },
-      { id: 'google/gemma-3-27b-it', name: 'Gemma 3 27B', contextWindow: 131072, supportsTools: false, supportsStreaming: true },
-      // Moonshot
-      { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'moonshotai/kimi-k2-instruct', name: 'Kimi K2 Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      // Others
-      { id: 'microsoft/phi-4-mini-instruct', name: 'Phi-4 Mini', contextWindow: 16384, supportsTools: false, supportsStreaming: true },
-      { id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-      { id: 'z-ai/glm-5.1', name: 'GLM 5.1', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
-    ],
-  },
-  {
-    id: 'custom',
-    name: 'Custom Endpoint',
-    description: 'Any OpenAI-compatible API endpoint',
-    requiresApiKey: false,
-    models: [
-      { id: 'custom', name: 'Custom Model', supportsTools: true, supportsStreaming: true },
     ],
   },
 ];
