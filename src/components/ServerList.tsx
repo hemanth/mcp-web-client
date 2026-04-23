@@ -22,6 +22,7 @@ import {
   Pencil,
   ChevronDown,
   ChevronUp,
+  Share2,
 } from 'lucide-react';
 import type { ServerInstance, OAuthCredentials, TransportType } from '@/lib/types';
 import { featuredServers, categoryLabels, type FeaturedServer } from '@/lib/featuredServers';
@@ -40,6 +41,7 @@ interface ServerListProps {
   onEditServer: (serverId: string, url: string, name?: string, customHeaders?: Record<string, string>) => void;
   onStartOAuth: (serverUrl: string, serverId?: string) => Promise<{ success: boolean; error?: string }>;
   onRegisterClient: (serverUrl: string) => Promise<{ success: boolean; clientId?: string; error?: string; requiresDirectAuth?: boolean; authUrl?: string }>;
+  onShareServers?: () => void;
   collapsed?: boolean;
 }
 
@@ -1054,6 +1056,7 @@ export function ServerList({
   onEditServer,
   onStartOAuth,
   onRegisterClient,
+  onShareServers,
   collapsed,
 }: ServerListProps) {
   const [showAddModal, setShowAddModal] = useState(false);
@@ -1181,18 +1184,29 @@ export function ServerList({
             <h4 className="text-xs font-medium text-[var(--foreground-muted)] uppercase tracking-wide">
               Servers
             </h4>
-            <button
-              onClick={() => setShowAddModal(true)}
-              disabled={isAdding}
-              className="p-1 hover:bg-[var(--background-tertiary)] rounded text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-              title="Add Server"
-            >
-              {isAdding ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4" />
+            <div className="flex items-center gap-1">
+              {onShareServers && (
+                <button
+                  onClick={onShareServers}
+                  className="p-1 hover:bg-[var(--background-tertiary)] rounded text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
+                  title="Share servers as link"
+                >
+                  <Share2 className="w-4 h-4" />
+                </button>
               )}
-            </button>
+              <button
+                onClick={() => setShowAddModal(true)}
+                disabled={isAdding}
+                className="p-1 hover:bg-[var(--background-tertiary)] rounded text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
+                title="Add Server"
+              >
+                {isAdding ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           </div>
           <div className="space-y-2">
             {servers.map((server) => (
