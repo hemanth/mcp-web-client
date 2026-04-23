@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, Suspense, lazy, memo } from 'react';
+import { useEffect, useState, useCallback, useRef, Suspense, lazy, memo } from 'react';
 import { Toaster, toast } from 'sonner';
 import { useSession } from 'next-auth/react';
 import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
@@ -29,6 +29,8 @@ import {
   X,
   Github,
   LogIn,
+  Share2,
+  Link,
 } from 'lucide-react';
 
 // Dynamic imports for code splitting - panels are lazy loaded
@@ -103,6 +105,7 @@ export default function Home() {
   const [pendingOAuthServer, setPendingOAuthServer] = useState<string | null>(null);
   const [showAddServerModal, setShowAddServerModal] = useState(false);
   const [isAddingServer, setIsAddingServer] = useState(false);
+  const urlServersProcessedRef = useRef(false);
 
   // LLM settings for sampling
   const { settings: llmSettings } = useLLMSettings();
@@ -296,6 +299,63 @@ export default function Home() {
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed(prev => !prev);
   }, []);
+
+  // Parse ?mcps= URL param to auto-add & connect servers
+  useEffect(() => {
+    if (urlServersProcessedRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const mcps = params.get('mcps');
+    if (!mcps) return;
+    urlServersProcessedRef.current = true;
+
+    // Clean the URL without reloading
+    const cleanUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, '', cleanUrl);
+
+    const urls = mcps.split(',').map(u => decodeURIComponent(u.trim())).filter(Boolean);
+    if (urls.length === 0) return;
+
+    // Add and connect each server
+    const addServersFromUrl = async () => {
+      for (const url of urls) {
+        // Skip if already exists
+        const exists = servers.find(s => s.url === url);
+        if (exists) {
+          // Auto-connect if disconnected
+          if (exists.status === 'disconnected') {
+            try { await connectServer(exists.id); } catch { /* handled by onError */ }
+          }
+          continue;
+        }
+        try {
+          const serverId = await addServer({ url });
+          await connectServer(serverId);
+        } catch {
+          // handled by onError
+        }
+      }
+      toast.success(`Added ${urls.length} server${urls.length > 1 ? 's' : ''} from shared link`);
+    };
+
+    addServersFromUrl();
+  }, [servers, addServer, connectServer]);
+
+  // Generate shareable URL with current servers
+  const handleShareServers = useCallback(async () => {
+    if (servers.length === 0) {
+      toast.error('No servers to share');
+      return;
+    }
+    const mcps = servers.map(s => encodeURIComponent(s.url)).join(',');
+    const shareUrl = `${window.location.origin}?mcps=${mcps}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success('Shareable link copied to clipboard!');
+    } catch {
+      // Fallback: prompt
+      prompt('Copy this link:', shareUrl);
+    }
+  }, [servers]);
 
   const isConnected = activeServer?.status === 'connected';
   const connectedServersCount = servers.filter(s => s.status === 'connected').length;
@@ -494,6 +554,15 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-4">
+            {servers.length > 0 && (
+              <button
+                onClick={handleShareServers}
+                className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
+                title="Share servers as link"
+              >
+                <Share2 className="w-5 h-5" />
+              </button>
+            )}
             <a
               href="https://github.com/hemanth/mcp-web-client"
               target="_blank"
