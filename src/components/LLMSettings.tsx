@@ -1,11 +1,80 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Eye, EyeOff, Check, X, Cpu, Zap, Brain, Server, Globe, Plus, Trash2 } from 'lucide-react';
+import { Settings, Eye, EyeOff, Check, X, Cpu, Zap, Brain, Server, Globe, Plus, Trash2, ChevronDown } from 'lucide-react';
 import type { LLMProvider, LLMSettings, LLMProviderConfig } from '@/lib/llm-types';
 import { LLM_PROVIDERS, DEFAULT_LLM_SETTINGS, ALL_PROVIDER_KEYS } from '@/lib/llm-types';
 
 const STORAGE_KEY = 'llm-settings';
+
+// Extracted model combobox component (needs its own state)
+function ModelCombobox({
+  models,
+  value,
+  onChange,
+  placeholder,
+}: {
+  models: { id: string; name: string; contextWindow?: number }[];
+  value: string;
+  onChange: (model: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
+
+  const filtered = models.filter(m =>
+    !filter ||
+    m.id.toLowerCase().includes(filter.toLowerCase()) ||
+    m.name.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setFilter(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => {
+            setFilter(value);
+            setOpen(true);
+          }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder={placeholder}
+          className="w-full px-3 py-2 pr-8 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+        />
+        <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground-muted)] pointer-events-none" />
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-[var(--background-secondary)] border border-[var(--border)] rounded-lg shadow-xl">
+          {filtered.map(model => (
+            <button
+              key={model.id}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(model.id);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-[var(--background-tertiary)] transition-colors flex items-center justify-between ${
+                value === model.id ? 'text-[var(--accent)]' : ''
+              }`}
+            >
+              <span className="truncate">{model.name}</span>
+              <span className="text-xs text-[var(--foreground-muted)] ml-2 flex-shrink-0">
+                {model.contextWindow ? `${Math.round(model.contextWindow / 1000)}k` : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const PROVIDER_ICONS: Record<LLMProvider, React.ReactNode> = {
   openai: <Zap className="w-5 h-5" />,
@@ -257,27 +326,17 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
                   </div>
                 )}
 
-                {/* Model Selection - editable combobox for all providers */}
+                {/* Model Selection - editable combobox */}
                 <div className="mb-3">
                   <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
                     Model
                   </label>
-                  <input
-                    type="text"
-                    list={`models-${providerInfo.id}`}
+                  <ModelCombobox
+                    models={providerInfo.models}
                     value={config.model || ''}
-                    onChange={(e) => updateProviderConfig(providerInfo.id, { model: e.target.value })}
-                    placeholder={isCustom ? 'e.g. gpt-4o, llama-3.3-70b' : `Type or select a ${providerInfo.name} model`}
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                    onChange={(model) => updateProviderConfig(providerInfo.id, { model })}
+                    placeholder={isCustom ? 'e.g. gpt-4o, llama-3.3-70b' : 'Type or select a model'}
                   />
-                  <datalist id={`models-${providerInfo.id}`}>
-                    {providerInfo.models.map(model => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                        {model.contextWindow && ` (${Math.round(model.contextWindow / 1000)}k)`}
-                      </option>
-                    ))}
-                  </datalist>
                 </div>
 
                 {/* Custom Headers (for custom provider) */}
