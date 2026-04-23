@@ -101,7 +101,7 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!input.trim() || isLoading || disabled) return;
+    if (!input.trim() || isLoading || !activeProvider) return;
 
     const message = input.trim();
     setInput('');
