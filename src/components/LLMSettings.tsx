@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Eye, EyeOff, Check, X, Cpu, Zap, Brain, Server, Globe, Plus, Trash2, ChevronDown } from 'lucide-react';
+import { Settings, Eye, EyeOff, Check, X, Cpu, Zap, Brain, Server, Globe, Plus, Trash2, ChevronDown, RefreshCw, Loader2 } from 'lucide-react';
 import type { LLMProvider, LLMSettings, LLMProviderConfig } from '@/lib/llm-types';
 import { LLM_PROVIDERS, DEFAULT_LLM_SETTINGS, ALL_PROVIDER_KEYS } from '@/lib/llm-types';
 
@@ -121,11 +121,40 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
     custom: null,
   });
 
+  const [fetchedModels, setFetchedModels] = useState<Record<string, { id: string; name: string; contextWindow?: number }[]>>({});
+  const [fetchingModels, setFetchingModels] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     setSettings(currentSettings);
   }, [currentSettings]);
 
   if (!isOpen) return null;
+
+  const fetchModels = async (provider: LLMProvider) => {
+    const config = settings.providers[provider];
+    setFetchingModels(prev => ({ ...prev, [provider]: true }));
+    try {
+      const res = await fetch('/api/llm/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          apiKey: config.apiKey,
+          baseUrl: config.baseUrl,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed');
+      }
+      const { models } = await res.json();
+      setFetchedModels(prev => ({ ...prev, [provider]: models }));
+    } catch (err) {
+      console.error(`Failed to fetch ${provider} models:`, err);
+    } finally {
+      setFetchingModels(prev => ({ ...prev, [provider]: false }));
+    }
+  };
 
   const updateProviderConfig = (provider: LLMProvider, updates: Partial<LLMProviderConfig>) => {
     setSettings(prev => ({
@@ -327,17 +356,51 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
                 )}
 
                 {/* Model Selection - editable combobox */}
-                <div className="mb-3">
-                  <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
-                    Model
-                  </label>
-                  <ModelCombobox
-                    models={providerInfo.models}
-                    value={config.model || ''}
-                    onChange={(model) => updateProviderConfig(providerInfo.id, { model })}
-                    placeholder={isCustom ? 'e.g. gpt-4o, llama-3.3-70b' : 'Type or select a model'}
-                  />
-                </div>
+                {(() => {
+                  // Merge fetched models with defaults (fetched take priority)
+                  const fetched = fetchedModels[providerInfo.id];
+                  const mergedModels = fetched && fetched.length > 0
+                    ? fetched
+                    : providerInfo.models;
+                  const canFetch = providerInfo.id !== 'custom' && providerInfo.id !== 'anthropic';
+                  const isFetching = fetchingModels[providerInfo.id];
+
+                  return (
+                    <div className="mb-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-medium text-[var(--foreground-muted)]">
+                          Model
+                          {fetched && fetched.length > 0 && (
+                            <span className="ml-1.5 text-[var(--accent)]">
+                              ({fetched.length} live)
+                            </span>
+                          )}
+                        </label>
+                        {canFetch && (
+                          <button
+                            onClick={() => fetchModels(providerInfo.id)}
+                            disabled={isFetching || (!config.apiKey && providerInfo.requiresApiKey)}
+                            className="flex items-center gap-1 px-2 py-0.5 text-xs text-[var(--foreground-muted)] hover:text-[var(--accent)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={config.apiKey ? 'Fetch latest models from API' : 'Enter API key first'}
+                          >
+                            {isFetching ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <RefreshCw className="w-3 h-3" />
+                            )}
+                            {isFetching ? 'Fetching…' : 'Refresh'}
+                          </button>
+                        )}
+                      </div>
+                      <ModelCombobox
+                        models={mergedModels}
+                        value={config.model || ''}
+                        onChange={(model) => updateProviderConfig(providerInfo.id, { model })}
+                        placeholder={isCustom ? 'e.g. gpt-4o, llama-3.3-70b' : 'Type or select a model'}
+                      />
+                    </div>
+                  );
+                })()}
 
                 {/* Custom Headers (for custom provider) */}
                 {isCustom && (
