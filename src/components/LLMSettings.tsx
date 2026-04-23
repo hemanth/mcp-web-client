@@ -257,33 +257,27 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
                   </div>
                 )}
 
-                {/* Model Selection - dropdown for preset providers, text input for custom */}
+                {/* Model Selection - editable combobox for all providers */}
                 <div className="mb-3">
                   <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
                     Model
                   </label>
-                  {isCustom ? (
-                    <input
-                      type="text"
-                      value={config.model || ''}
-                      onChange={(e) => updateProviderConfig(providerInfo.id, { model: e.target.value })}
-                      placeholder="e.g. gpt-4o, llama-3.3-70b, mistral-large"
-                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                    />
-                  ) : (
-                    <select
-                      value={config.model}
-                      onChange={(e) => updateProviderConfig(providerInfo.id, { model: e.target.value })}
-                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                    >
-                      {providerInfo.models.map(model => (
-                        <option key={model.id} value={model.id}>
-                          {model.name}
-                          {model.contextWindow && ` (${Math.round(model.contextWindow / 1000)}k context)`}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <input
+                    type="text"
+                    list={`models-${providerInfo.id}`}
+                    value={config.model || ''}
+                    onChange={(e) => updateProviderConfig(providerInfo.id, { model: e.target.value })}
+                    placeholder={isCustom ? 'e.g. gpt-4o, llama-3.3-70b' : `Type or select a ${providerInfo.name} model`}
+                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  />
+                  <datalist id={`models-${providerInfo.id}`}>
+                    {providerInfo.models.map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                        {model.contextWindow && ` (${Math.round(model.contextWindow / 1000)}k)`}
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
 
                 {/* Custom Headers (for custom provider) */}
