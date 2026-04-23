@@ -27,6 +27,7 @@ interface ChatRequest {
   apiKey?: string; // deprecated: prefer cookie-based keys
   baseUrl?: string;
   systemPrompt?: string;
+  customHeaders?: Record<string, string>;
 }
 
 // Convert our messages to provider-specific format
@@ -544,6 +545,93 @@ async function callOllama(request: ChatRequest): Promise<Response> {
   });
 }
 
+// OpenAI-compatible endpoint handler (used for NVIDIA NIM and Custom endpoints)
+async function callOpenAICompatible(request: ChatRequest): Promise<Response> {
+  const baseUrl = request.baseUrl;
+  if (!baseUrl) {
+    throw new Error('Base URL is required for this provider');
+  }
+
+  const messages = convertMessagesForOpenAI(request.messages, request.systemPrompt);
+  const tools = convertToolsForOpenAI(request.tools);
+
+  const body: Record<string, unknown> = {
+    model: request.model,
+    messages,
+    stream: request.stream,
+  };
+
+  if (tools) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
+
+  // Build headers: start with content type, add Bearer auth if key provided, merge custom headers
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (request.apiKey) {
+    headers['Authorization'] = `Bearer ${request.apiKey}`;
+  }
+
+  // Merge custom headers (can override defaults except Content-Type)
+  if (request.customHeaders) {
+    for (const [key, value] of Object.entries(request.customHeaders)) {
+      if (key && value) {
+        headers[key] = value;
+      }
+    }
+  }
+
+  // Normalize base URL: ensure it ends with /chat/completions
+  let url = baseUrl.replace(/\/$/, '');
+  if (!url.endsWith('/chat/completions')) {
+    url = url.endsWith('/v1')
+      ? `${url}/chat/completions`
+      : `${url}/v1/chat/completions`;
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`API error (${request.provider}): ${response.status} - ${error}`);
+  }
+
+  if (request.stream) {
+    return new Response(response.body, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  }
+
+  const data = await response.json();
+  const { content, toolCalls } = parseOpenAIToolCalls(data);
+
+  return Response.json({
+    message: {
+      id: `msg_${Date.now()}`,
+      role: 'assistant',
+      content,
+      timestamp: Date.now(),
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    },
+    usage: data.usage ? {
+      promptTokens: data.usage.prompt_tokens,
+      completionTokens: data.usage.completion_tokens,
+      totalTokens: data.usage.total_tokens,
+    } : undefined,
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as ChatRequest;
@@ -567,6 +655,9 @@ export async function POST(request: NextRequest) {
         return await callGemini(body);
       case 'ollama':
         return await callOllama(body);
+      case 'nvidia':
+      case 'custom':
+        return await callOpenAICompatible(body);
       default:
         return Response.json({ error: `Unknown provider: ${provider}` }, { status: 400 });
     }

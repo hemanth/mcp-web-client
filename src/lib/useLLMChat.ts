@@ -130,6 +130,7 @@ export function useLLMChat({ settings, tools, onToolCall }: UseLLMChatOptions): 
             tools: [...(tools || []), ...getInternalTools(tools || [])].filter(t => !t.deferLoading),
             apiKey: config.apiKey,
             baseUrl: config.baseUrl,
+            customHeaders: config.customHeaders,
             systemPrompt: settings.systemPrompt || getDefaultSystemPrompt(tools, true),
           }),
           signal: abortControllerRef.current?.signal,

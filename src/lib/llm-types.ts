@@ -1,13 +1,14 @@
 // LLM Provider Types
 
-export type LLMProvider = 'openai' | 'anthropic' | 'gemini' | 'ollama';
+export type LLMProvider = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'nvidia' | 'custom';
 
 export interface LLMProviderConfig {
   provider: LLMProvider;
   apiKey?: string;
-  baseUrl?: string; // For Ollama or custom endpoints
+  baseUrl?: string; // For Ollama, NVIDIA, or custom endpoints
   model: string;
   enabled: boolean;
+  customHeaders?: Record<string, string>; // For custom endpoint headers
 }
 
 export interface LLMProviderInfo {
@@ -80,6 +81,27 @@ export const LLM_PROVIDERS: LLMProviderInfo[] = [
       { id: 'phi4', name: 'Phi-4', supportsTools: false, supportsStreaming: true },
     ],
   },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA NIM',
+    description: 'NVIDIA hosted models via build.nvidia.com',
+    requiresApiKey: true,
+    defaultBaseUrl: 'https://integrate.api.nvidia.com/v1',
+    models: [
+      { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', name: 'Nemotron Ultra 253B', contextWindow: 131072, supportsTools: true, supportsStreaming: true },
+      { id: 'deepseek-ai/deepseek-r1', name: 'DeepSeek R1', contextWindow: 65536, supportsTools: false, supportsStreaming: true },
+    ],
+  },
+  {
+    id: 'custom',
+    name: 'Custom Endpoint',
+    description: 'Any OpenAI-compatible API endpoint',
+    requiresApiKey: false,
+    models: [
+      { id: 'custom', name: 'Custom Model', supportsTools: true, supportsStreaming: true },
+    ],
+  },
 ];
 
 // Tool Result Content (from MCP)
@@ -128,6 +150,7 @@ export interface LLMChatRequest {
   stream?: boolean;
   apiKey?: string;
   baseUrl?: string;
+  customHeaders?: Record<string, string>;
 }
 
 export interface MCPToolDefinition {
@@ -171,6 +194,9 @@ export interface LLMSettings {
   systemPrompt?: string;
 }
 
+// Helper to get all provider keys for iteration
+export const ALL_PROVIDER_KEYS: LLMProvider[] = ['openai', 'anthropic', 'gemini', 'ollama', 'nvidia', 'custom'];
+
 export const DEFAULT_LLM_SETTINGS: LLMSettings = {
   activeProvider: null,
   providers: {
@@ -178,5 +204,7 @@ export const DEFAULT_LLM_SETTINGS: LLMSettings = {
     anthropic: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022', enabled: false },
     gemini: { provider: 'gemini', model: 'gemini-2.0-flash-exp', enabled: false },
     ollama: { provider: 'ollama', model: 'llama3.2', baseUrl: 'http://localhost:11434', enabled: false },
+    nvidia: { provider: 'nvidia', model: 'meta/llama-3.3-70b-instruct', baseUrl: 'https://integrate.api.nvidia.com/v1', enabled: false },
+    custom: { provider: 'custom', model: '', baseUrl: '', enabled: false, customHeaders: {} },
   },
 };
