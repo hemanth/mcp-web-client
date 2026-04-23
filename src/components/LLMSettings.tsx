@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Eye, EyeOff, Check, X, Cpu, Zap, Brain, Server } from 'lucide-react';
+import { Settings, Eye, EyeOff, Check, X, Cpu, Zap, Brain, Server, Globe, Plus, Trash2 } from 'lucide-react';
 import type { LLMProvider, LLMSettings, LLMProviderConfig } from '@/lib/llm-types';
-import { LLM_PROVIDERS, DEFAULT_LLM_SETTINGS } from '@/lib/llm-types';
+import { LLM_PROVIDERS, DEFAULT_LLM_SETTINGS, ALL_PROVIDER_KEYS } from '@/lib/llm-types';
 
 const STORAGE_KEY = 'llm-settings';
 
@@ -12,6 +12,8 @@ const PROVIDER_ICONS: Record<LLMProvider, React.ReactNode> = {
   anthropic: <Brain className="w-5 h-5" />,
   gemini: <Cpu className="w-5 h-5" />,
   ollama: <Server className="w-5 h-5" />,
+  nvidia: <Cpu className="w-5 h-5" />,
+  custom: <Globe className="w-5 h-5" />,
 };
 
 const PROVIDER_COLORS: Record<LLMProvider, string> = {
@@ -19,6 +21,8 @@ const PROVIDER_COLORS: Record<LLMProvider, string> = {
   anthropic: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
   gemini: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
   ollama: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  nvidia: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  custom: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
 };
 
 interface LLMSettingsProps {
@@ -35,6 +39,8 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
     anthropic: false,
     gemini: false,
     ollama: false,
+    nvidia: false,
+    custom: false,
   });
   const [testingProvider, setTestingProvider] = useState<LLMProvider | null>(null);
   const [testResults, setTestResults] = useState<Record<LLMProvider, 'success' | 'error' | null>>({
@@ -42,6 +48,8 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
     anthropic: null,
     gemini: null,
     ollama: null,
+    nvidia: null,
+    custom: null,
   });
 
   useEffect(() => {
@@ -77,6 +85,30 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
     }));
   };
 
+  const addCustomHeader = (provider: LLMProvider) => {
+    const config = settings.providers[provider];
+    const headers = { ...(config.customHeaders || {}) };
+    headers[`X-Header-${Object.keys(headers).length + 1}`] = '';
+    updateProviderConfig(provider, { customHeaders: headers });
+  };
+
+  const updateCustomHeader = (provider: LLMProvider, oldKey: string, newKey: string, value: string) => {
+    const config = settings.providers[provider];
+    const headers = { ...(config.customHeaders || {}) };
+    if (oldKey !== newKey) {
+      delete headers[oldKey];
+    }
+    headers[newKey] = value;
+    updateProviderConfig(provider, { customHeaders: headers });
+  };
+
+  const removeCustomHeader = (provider: LLMProvider, key: string) => {
+    const config = settings.providers[provider];
+    const headers = { ...(config.customHeaders || {}) };
+    delete headers[key];
+    updateProviderConfig(provider, { customHeaders: headers });
+  };
+
   const testConnection = async (provider: LLMProvider) => {
     setTestingProvider(provider);
     setTestResults(prev => ({ ...prev, [provider]: null }));
@@ -91,6 +123,7 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
           model: config.model,
           apiKey: config.apiKey,
           baseUrl: config.baseUrl,
+          customHeaders: config.customHeaders,
         }),
       });
 
@@ -139,6 +172,8 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
             const config = settings.providers[providerInfo.id];
             const isActive = settings.activeProvider === providerInfo.id;
             const testResult = testResults[providerInfo.id];
+            const isCustom = providerInfo.id === 'custom';
+            const showBaseUrl = providerInfo.id === 'ollama' || providerInfo.id === 'nvidia' || providerInfo.id === 'custom';
 
             return (
               <div
@@ -172,11 +207,27 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
                   </button>
                 </div>
 
-                {/* API Key Input */}
-                {providerInfo.requiresApiKey && (
+                {/* Base URL (for ollama, nvidia, custom) */}
+                {showBaseUrl && (
                   <div className="mb-3">
                     <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
-                      API Key
+                      Base URL {isCustom && <span className="text-red-400">*</span>}
+                    </label>
+                    <input
+                      type="text"
+                      value={config.baseUrl || providerInfo.defaultBaseUrl || ''}
+                      onChange={(e) => updateProviderConfig(providerInfo.id, { baseUrl: e.target.value })}
+                      placeholder={providerInfo.defaultBaseUrl || 'https://your-endpoint.com/v1'}
+                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                    />
+                  </div>
+                )}
+
+                {/* API Key Input */}
+                {(providerInfo.requiresApiKey || isCustom) && (
+                  <div className="mb-3">
+                    <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
+                      API Key {!providerInfo.requiresApiKey && '(optional)'}
                     </label>
                     <div className="relative">
                       <input
@@ -196,40 +247,84 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
                   </div>
                 )}
 
-                {/* Base URL for Ollama */}
-                {providerInfo.id === 'ollama' && (
-                  <div className="mb-3">
-                    <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
-                      Base URL
-                    </label>
-                    <input
-                      type="text"
-                      value={config.baseUrl || providerInfo.defaultBaseUrl || ''}
-                      onChange={(e) => updateProviderConfig(providerInfo.id, { baseUrl: e.target.value })}
-                      placeholder={providerInfo.defaultBaseUrl}
-                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                    />
-                  </div>
-                )}
-
-                {/* Model Selection */}
+                {/* Model Selection - dropdown for preset providers, text input for custom */}
                 <div className="mb-3">
                   <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
                     Model
                   </label>
-                  <select
-                    value={config.model}
-                    onChange={(e) => updateProviderConfig(providerInfo.id, { model: e.target.value })}
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                  >
-                    {providerInfo.models.map(model => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                        {model.contextWindow && ` (${Math.round(model.contextWindow / 1000)}k context)`}
-                      </option>
-                    ))}
-                  </select>
+                  {isCustom ? (
+                    <input
+                      type="text"
+                      value={config.model || ''}
+                      onChange={(e) => updateProviderConfig(providerInfo.id, { model: e.target.value })}
+                      placeholder="e.g. gpt-4o, llama-3.3-70b, mistral-large"
+                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                    />
+                  ) : (
+                    <select
+                      value={config.model}
+                      onChange={(e) => updateProviderConfig(providerInfo.id, { model: e.target.value })}
+                      className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                    >
+                      {providerInfo.models.map(model => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                          {model.contextWindow && ` (${Math.round(model.contextWindow / 1000)}k context)`}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
+
+                {/* Custom Headers (for custom provider) */}
+                {isCustom && (
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-medium text-[var(--foreground-muted)]">
+                        Custom Headers
+                      </label>
+                      <button
+                        onClick={() => addCustomHeader(providerInfo.id)}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-[var(--accent)] hover:bg-[var(--accent)]/10 rounded-md transition-colors"
+                      >
+                        <Plus className="w-3 h-3" /> Add
+                      </button>
+                    </div>
+                    {Object.entries(config.customHeaders || {}).length > 0 ? (
+                      <div className="space-y-2">
+                        {Object.entries(config.customHeaders || {}).map(([key, value]) => (
+                          <div key={key} className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={key}
+                              onChange={(e) => updateCustomHeader(providerInfo.id, key, e.target.value, value)}
+                              placeholder="Header name"
+                              className="flex-1 px-3 py-1.5 bg-[var(--background)] border border-[var(--border)] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                            />
+                            <span className="text-[var(--foreground-muted)] text-xs">:</span>
+                            <input
+                              type="text"
+                              value={value}
+                              onChange={(e) => updateCustomHeader(providerInfo.id, key, key, e.target.value)}
+                              placeholder="Value"
+                              className="flex-1 px-3 py-1.5 bg-[var(--background)] border border-[var(--border)] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                            />
+                            <button
+                              onClick={() => removeCustomHeader(providerInfo.id, key)}
+                              className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[var(--foreground-muted)] italic">
+                        No custom headers. Add headers for auth tokens, org IDs, etc.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Test Connection */}
                 <div className="flex items-center gap-2">
@@ -301,13 +396,16 @@ export function useLLMSettings() {
       if (stored) {
         const parsed = JSON.parse(stored);
         // Merge with defaults to handle new providers
+        const mergedProviders = { ...DEFAULT_LLM_SETTINGS.providers };
+        for (const key of ALL_PROVIDER_KEYS) {
+          if (parsed.providers?.[key]) {
+            mergedProviders[key] = { ...mergedProviders[key], ...parsed.providers[key] };
+          }
+        }
         setSettings({
           ...DEFAULT_LLM_SETTINGS,
           ...parsed,
-          providers: {
-            ...DEFAULT_LLM_SETTINGS.providers,
-            ...parsed.providers,
-          },
+          providers: mergedProviders,
         });
       }
     } catch {

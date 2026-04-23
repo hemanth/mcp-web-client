@@ -23,6 +23,7 @@ interface TestRequest {
   model: string;
   apiKey?: string;
   baseUrl?: string;
+  customHeaders?: Record<string, string>;
 }
 
 async function testOpenAI(apiKey: string): Promise<boolean> {
@@ -65,6 +66,60 @@ async function testOllama(baseUrl: string): Promise<boolean> {
   return response.ok;
 }
 
+async function testOpenAICompatible(
+  baseUrl: string,
+  apiKey?: string,
+  customHeaders?: Record<string, string>
+): Promise<boolean> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  if (customHeaders) {
+    for (const [key, value] of Object.entries(customHeaders)) {
+      if (key && value) {
+        headers[key] = value;
+      }
+    }
+  }
+
+  // Try /models first, fall back to a minimal chat completion
+  const url = baseUrl.replace(/\/$/, '');
+  const modelsUrl = url.endsWith('/v1') ? `${url}/models` : `${url}/v1/models`;
+
+  try {
+    const response = await fetch(modelsUrl, { headers });
+    if (response.ok) return true;
+  } catch {
+    // /models not available, try a minimal completion
+  }
+
+  // Fall back: attempt a tiny chat request
+  try {
+    const chatUrl = url.endsWith('/v1')
+      ? `${url}/chat/completions`
+      : `${url}/v1/chat/completions`;
+
+    const response = await fetch(chatUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: 'test',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1,
+      }),
+    });
+    // Any non-network-error response means the endpoint is reachable
+    return response.ok || response.status === 400 || response.status === 401 || response.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as TestRequest;
@@ -93,6 +148,13 @@ export async function POST(request: NextRequest) {
       case 'ollama':
         success = await testOllama(baseUrl || 'http://localhost:11434');
         break;
+      case 'nvidia':
+      case 'custom': {
+        const bUrl = baseUrl || (provider === 'nvidia' ? 'https://integrate.api.nvidia.com/v1' : '');
+        if (!bUrl) throw new Error('Base URL required');
+        success = await testOpenAICompatible(bUrl, apiKey, body.customHeaders);
+        break;
+      }
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
