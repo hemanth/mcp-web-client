@@ -29,8 +29,6 @@ import {
   X,
   Github,
   LogIn,
-  Share2,
-  Link,
 } from 'lucide-react';
 
 // Dynamic imports for code splitting - panels are lazy loaded
@@ -502,6 +500,7 @@ export default function Home() {
             onEditServer={editServer}
             onStartOAuth={handleStartOAuth}
             onRegisterClient={handleRegisterClient}
+            onShareServers={handleShareServers}
             collapsed={sidebarCollapsed}
           />
         </div>
@@ -562,15 +561,6 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-4">
-            {servers.length > 0 && (
-              <button
-                onClick={handleShareServers}
-                className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
-                title="Share servers as link"
-              >
-                <Share2 className="w-5 h-5" />
-              </button>
-            )}
             <a
               href="https://github.com/hemanth/mcp-web-client"
               target="_blank"
