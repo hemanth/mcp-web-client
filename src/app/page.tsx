@@ -520,7 +520,7 @@ export default function Home() {
         {/* Content Area */}
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Main Panel */}
-          <div className={`flex-1 ${isConnected || servers.length > 0 ? 'p-4 md:p-6' : 'p-4 md:p-6 flex items-center justify-center'} overflow-y-auto contain-layout`}>
+          <div className={`flex-1 ${servers.length === 0 ? 'p-4 md:p-6 flex items-center justify-center' : 'p-4 md:p-6'} overflow-y-auto contain-layout`}>
             {servers.length === 0 ? (
               <div className="text-center max-w-md mx-auto">
                 <div className="w-16 h-16 md:w-20 md:h-20 mx-auto rounded-2xl bg-[var(--background-secondary)] flex items-center justify-center mb-4 md:mb-6">
@@ -543,17 +543,6 @@ export default function Home() {
                   Click the <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--background-tertiary)] rounded"><span className="text-lg">+</span></span> button in the sidebar to add a server.
                 </p>
               </div>
-            ) : !isConnected ? (
-              <div className="text-center max-w-md mx-auto">
-                <div className="w-16 h-16 md:w-20 md:h-20 mx-auto rounded-2xl bg-[var(--background-secondary)] flex items-center justify-center mb-4 md:mb-6">
-                  <Server className="w-8 h-8 md:w-10 md:h-10 text-[var(--foreground-muted)]" />
-                </div>
-                <h3 className="text-lg md:text-xl font-semibold mb-2 md:mb-3">Select a Server</h3>
-                <p className="text-sm md:text-base text-[var(--foreground-muted)]">
-                  <span className="md:hidden">Tap the menu icon to select a server.</span>
-                  <span className="hidden md:inline">Click on a server in the sidebar to connect or select it as active.</span>
-                </p>
-              </div>
             ) : (
               <div className="h-full">
                 <Suspense fallback={<PanelLoader />}>
@@ -568,7 +557,7 @@ export default function Home() {
                     />
                   )}
 
-                  {activePanel === 'tools' && (
+                  {activePanel === 'tools' && isConnected && (
                     <ToolsPanel
                       tools={currentTools}
                       onCallTool={callTool}
@@ -576,7 +565,7 @@ export default function Home() {
                     />
                   )}
 
-                  {activePanel === 'resources' && (
+                  {activePanel === 'resources' && isConnected && (
                     <ResourcesPanel
                       resources={currentResources}
                       onReadResource={readResource}
@@ -584,12 +573,25 @@ export default function Home() {
                     />
                   )}
 
-                  {activePanel === 'prompts' && (
+                  {activePanel === 'prompts' && isConnected && (
                     <PromptsPanel
                       prompts={currentPrompts}
                       onGetPrompt={getPrompt}
                       disabled={!isConnected}
                     />
+                  )}
+
+                  {/* Show prompt when non-chat panels selected without connection */}
+                  {activePanel !== 'chat' && !isConnected && (
+                    <div className="flex flex-col items-center justify-center h-full text-center">
+                      <div className="w-16 h-16 md:w-20 md:h-20 mx-auto rounded-2xl bg-[var(--background-secondary)] flex items-center justify-center mb-4 md:mb-6">
+                        <Server className="w-8 h-8 md:w-10 md:h-10 text-[var(--foreground-muted)]" />
+                      </div>
+                      <h3 className="text-lg md:text-xl font-semibold mb-2 md:mb-3">Connect a Server</h3>
+                      <p className="text-sm md:text-base text-[var(--foreground-muted)]">
+                        Connect to an MCP server to use {activePanel}.
+                      </p>
+                    </div>
                   )}
                 </Suspense>
               </div>

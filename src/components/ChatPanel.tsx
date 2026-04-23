@@ -193,7 +193,7 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
             </div>
             <h3 className="text-lg font-medium mb-2">Configure an LLM Provider</h3>
             <p className="text-sm text-[var(--foreground-muted)] max-w-sm mb-4">
-              Connect to OpenAI, Anthropic, Google Gemini, or Ollama to start chatting with AI.
+              Connect to OpenAI, Anthropic, Google Gemini, NVIDIA NIM, or any custom endpoint to start chatting.
             </p>
             <button
               onClick={() => setShowSettings(true)}
@@ -273,19 +273,17 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              disabled
-                ? 'Connect to a server first...'
-                : !activeProvider
+              !activeProvider
                 ? 'Configure an LLM provider to start chatting...'
                 : 'Type a message...'
             }
-            disabled={disabled || isLoading || !activeProvider}
+            disabled={isLoading || !activeProvider}
             rows={1}
             className="w-full px-4 py-3 pr-12 bg-[var(--background-tertiary)] border border-[var(--border)] rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed text-sm placeholder:text-[var(--foreground-muted)]"
           />
           <button
             type="submit"
-            disabled={disabled || isLoading || !input.trim() || !activeProvider}
+            disabled={isLoading || !input.trim() || !activeProvider}
             className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[var(--accent)]"
           >
             {isLoading ? (
