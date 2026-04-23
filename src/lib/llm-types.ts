@@ -16,6 +16,7 @@ export interface LLMProviderInfo {
   name: string;
   description: string;
   requiresApiKey: boolean;
+  apiKeyUrl?: string;
   defaultBaseUrl?: string;
   models: LLMModelInfo[];
 }
@@ -35,6 +36,7 @@ export const LLM_PROVIDERS: LLMProviderInfo[] = [
     name: 'OpenAI',
     description: 'GPT-5.4 and reasoning models',
     requiresApiKey: true,
+    apiKeyUrl: 'https://platform.openai.com/api-keys',
     models: [
       { id: 'gpt-5.4', name: 'GPT-5.4', contextWindow: 1047576, supportsTools: true, supportsStreaming: true },
       { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', contextWindow: 1047576, supportsTools: true, supportsStreaming: true },
@@ -52,6 +54,7 @@ export const LLM_PROVIDERS: LLMProviderInfo[] = [
     name: 'Anthropic',
     description: 'Claude Opus 4 and Sonnet 4 models',
     requiresApiKey: true,
+    apiKeyUrl: 'https://console.anthropic.com/settings/keys',
     models: [
       { id: 'claude-opus-4-20250715', name: 'Claude Opus 4', contextWindow: 200000, supportsTools: true, supportsStreaming: true },
       { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', contextWindow: 200000, supportsTools: true, supportsStreaming: true },
@@ -65,6 +68,7 @@ export const LLM_PROVIDERS: LLMProviderInfo[] = [
     name: 'Google Gemini',
     description: 'Gemini 3.1, 2.5, and 2.0 models',
     requiresApiKey: true,
+    apiKeyUrl: 'https://aistudio.google.com/apikey',
     models: [
       { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', contextWindow: 1048576, supportsTools: true, supportsStreaming: true },
       { id: 'gemini-2.5-pro-preview-05-06', name: 'Gemini 2.5 Pro', contextWindow: 1048576, supportsTools: true, supportsStreaming: true },
@@ -96,6 +100,7 @@ export const LLM_PROVIDERS: LLMProviderInfo[] = [
     name: 'NVIDIA NIM',
     description: 'NVIDIA hosted models via build.nvidia.com',
     requiresApiKey: true,
+    apiKeyUrl: 'https://build.nvidia.com/explore/discover',
     defaultBaseUrl: 'https://integrate.api.nvidia.com/v1',
     models: [
       // Meta Llama

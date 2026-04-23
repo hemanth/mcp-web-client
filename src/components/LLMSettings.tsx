@@ -226,8 +226,18 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
                 {/* API Key Input */}
                 {(providerInfo.requiresApiKey || isCustom) && (
                   <div className="mb-3">
-                    <label className="block text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
-                      API Key {!providerInfo.requiresApiKey && '(optional)'}
+                    <label className="flex items-center justify-between text-xs font-medium text-[var(--foreground-muted)] mb-1.5">
+                      <span>API Key {!providerInfo.requiresApiKey && '(optional)'}</span>
+                      {providerInfo.apiKeyUrl && (
+                        <a
+                          href={providerInfo.apiKeyUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[var(--accent)] hover:underline"
+                        >
+                          Get API Key →
+                        </a>
+                      )}
                     </label>
                     <div className="relative">
                       <input
