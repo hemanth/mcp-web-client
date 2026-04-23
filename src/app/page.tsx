@@ -300,28 +300,31 @@ export default function Home() {
     setSidebarCollapsed(prev => !prev);
   }, []);
 
-  // Parse ?mcps= URL param to auto-add & connect servers
+  // Parse URL hash to auto-add & connect servers
+  // Format: https://mcphost.link/#server1.com/sse,server2.com/mcp
   useEffect(() => {
     if (urlServersProcessedRef.current) return;
-    const params = new URLSearchParams(window.location.search);
-    const mcps = params.get('mcps');
-    if (!mcps) return;
+    const hash = window.location.hash.slice(1); // remove #
+    if (!hash) return;
     urlServersProcessedRef.current = true;
 
     // Clean the URL without reloading
-    const cleanUrl = window.location.pathname + window.location.hash;
-    window.history.replaceState({}, '', cleanUrl);
+    window.history.replaceState({}, '', window.location.pathname);
 
-    const urls = mcps.split(',').map(u => decodeURIComponent(u.trim())).filter(Boolean);
-    if (urls.length === 0) return;
+    const entries = hash.split(',').map(s => s.trim()).filter(Boolean);
+    if (entries.length === 0) return;
 
-    // Add and connect each server
+    // Restore full URLs: assume https:// unless http:// is explicit
+    const urls = entries.map(s => {
+      if (s.startsWith('http://') || s.startsWith('https://')) return s;
+      return `https://${s}`;
+    });
+
     const addServersFromUrl = async () => {
+      let added = 0;
       for (const url of urls) {
-        // Skip if already exists
         const exists = servers.find(s => s.url === url);
         if (exists) {
-          // Auto-connect if disconnected
           if (exists.status === 'disconnected') {
             try { await connectServer(exists.id); } catch { /* handled by onError */ }
           }
@@ -330,11 +333,14 @@ export default function Home() {
         try {
           const serverId = await addServer({ url });
           await connectServer(serverId);
+          added++;
         } catch {
           // handled by onError
         }
       }
-      toast.success(`Added ${urls.length} server${urls.length > 1 ? 's' : ''} from shared link`);
+      if (added > 0) {
+        toast.success(`Added ${added} server${added > 1 ? 's' : ''} from shared link`);
+      }
     };
 
     addServersFromUrl();
@@ -346,13 +352,15 @@ export default function Home() {
       toast.error('No servers to share');
       return;
     }
-    const mcps = servers.map(s => encodeURIComponent(s.url)).join(',');
-    const shareUrl = `${window.location.origin}?mcps=${mcps}`;
+    // Strip https:// for cleaner URLs, keep http:// if non-standard
+    const shortUrls = servers.map(s =>
+      s.url.startsWith('https://') ? s.url.slice(8) : s.url
+    );
+    const shareUrl = `${window.location.origin}/#${shortUrls.join(',')}`;
     try {
       await navigator.clipboard.writeText(shareUrl);
       toast.success('Shareable link copied to clipboard!');
     } catch {
-      // Fallback: prompt
       prompt('Copy this link:', shareUrl);
     }
   }, [servers]);
