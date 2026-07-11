@@ -103,46 +103,42 @@ export default function LandingPage() {
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] overflow-x-hidden">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:p-4 focus:bg-[var(--accent)] focus:text-white">Skip to content</a>
 
-      {/* Navigation — minimal, barely there */}
-      <nav className="fixed top-0 left-0 right-0 z-50 landing-nav">
-        <div className="max-w-6xl mx-auto px-5 sm:px-8">
-          <div className="flex items-center justify-between h-14">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-md bg-[var(--accent)] flex items-center justify-center">
-                <Zap className="w-3.5 h-3.5 text-[var(--background)]" />
-              </div>
-              <span className="font-semibold text-sm tracking-tight">MCPHost</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <a
-                href="https://github.com/hemanth/mcp-web-client"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 rounded-md text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
-                aria-label="View on GitHub"
-              >
-                <Github className="w-4 h-4" />
-              </a>
-              <Link
-                href="/dashboard"
-                className="hidden sm:flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[var(--foreground)] text-[var(--background)] text-sm font-medium hover:bg-[var(--foreground)]/90 transition-colors"
-              >
-                Launch App
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
-
       <main id="main-content">
-        {/* Hero — typographic, restrained */}
-        <section className="relative pt-28 pb-16 sm:pt-36 sm:pb-24 px-5 sm:px-8">
+        {/* Hero — seamless, no header */}
+        <section className="relative pt-8 pb-16 sm:pt-12 sm:pb-24 px-5 sm:px-8">
           <div className="hero-glow hero-glow-1" style={{ width: 700, height: 500 }} aria-hidden="true" />
           <div className="hero-glow hero-glow-2" style={{ width: 400, height: 300 }} aria-hidden="true" />
           <div className="hero-grid" aria-hidden="true" />
 
           <div className="relative max-w-3xl mx-auto">
+            {/* Top row — logo + links, inline, no bar */}
+            <div className="flex items-center justify-between mb-16 sm:mb-20">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded bg-[var(--accent)] flex items-center justify-center">
+                  <Zap className="w-3 h-3 text-[var(--background)]" />
+                </div>
+                <span className="font-semibold text-sm tracking-tight">MCPHost</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <a
+                  href="https://github.com/hemanth/mcp-web-client"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] transition-colors"
+                  aria-label="View on GitHub"
+                >
+                  <Github className="w-4 h-4" />
+                </a>
+                <Link
+                  href="/dashboard"
+                  className="hidden sm:flex items-center gap-1.5 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  Launch App
+                  <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+            </div>
+
             {/* Badge */}
             <div className="flex items-center gap-2 mb-8 sm:mb-10">
               <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] pulse-glow" />
