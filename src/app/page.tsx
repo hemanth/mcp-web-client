@@ -1,720 +1,355 @@
-'use client';
-
-import { useEffect, useState, useCallback, useRef, Suspense, lazy, memo } from 'react';
-import { Toaster, toast } from 'sonner';
-import { useSession } from 'next-auth/react';
-import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
-import { useOAuth } from '@/lib/useOAuth';
-import { useServerSync } from '@/lib/useServerSync';
-import { useSamplingFlow } from '@/lib/useSamplingFlow';
-import { useElicitationFlow } from '@/lib/useElicitationFlow';
-import { ServerList, AddServerModal } from '@/components/ServerList';
-import { ServerInfo } from '@/components/ServerInfo';
-import { SamplingModal } from '@/components/SamplingModal';
-import { ElicitationModal } from '@/components/ElicitationModal';
-import { useLLMSettings } from '@/components/LLMSettings';
-import { UserMenu } from '@/components/UserMenu';
-import type { OAuthCredentials, TransportType, SamplingRequest, ElicitationRequest } from '@/lib/types';
+import Link from 'next/link';
 import {
-  MessageSquare,
-  Wrench,
-  FileText,
-  BookOpen,
   Zap,
-  ChevronLeft,
-  ChevronRight,
   Server,
-  Loader2,
-  Menu,
-  X,
+  Shield,
+  Radio,
+  Wrench,
+  MessageSquare,
+  Puzzle,
+  ArrowRight,
   Github,
-  LogIn,
+  Plus,
+  KeyRound,
+  Rocket,
+  ExternalLink,
+  ChevronRight,
 } from 'lucide-react';
 
-// Dynamic imports for code splitting - panels are lazy loaded
-const ChatPanel = lazy(() => import('@/components/ChatPanel').then(m => ({ default: m.ChatPanel })));
-const ToolsPanel = lazy(() => import('@/components/ToolsPanel').then(m => ({ default: m.ToolsPanel })));
-const ResourcesPanel = lazy(() => import('@/components/ResourcesPanel').then(m => ({ default: m.ResourcesPanel })));
-const PromptsPanel = lazy(() => import('@/components/PromptsPanel').then(m => ({ default: m.PromptsPanel })));
+const features = [
+  {
+    icon: Server,
+    title: 'Multi-Server',
+    description: 'Connect to multiple MCP servers at once. One unified interface for all your integrations.',
+  },
+  {
+    icon: Shield,
+    title: 'OAuth 2.0 & PKCE',
+    description: 'Secure auth with automatic token refresh, PKCE support, and dynamic client registration.',
+  },
+  {
+    icon: Radio,
+    title: 'Real-time Streaming',
+    description: 'SSE and Streamable HTTP transports for live updates and bi-directional communication.',
+  },
+  {
+    icon: Wrench,
+    title: 'Full Protocol',
+    description: 'Tools, resources, prompts, sampling, elicitation, progress, logging — the complete spec.',
+  },
+  {
+    icon: MessageSquare,
+    title: 'LLM Chat',
+    description: 'Built-in chat with configurable AI providers. Tools from all servers in one conversation.',
+  },
+  {
+    icon: Puzzle,
+    title: '50+ Integrations',
+    description: 'Pre-configured servers for Notion, Stripe, Vercel, Figma, HubSpot and more.',
+  },
+];
 
-type ActivePanel = 'chat' | 'tools' | 'resources' | 'prompts';
+const integrations = [
+  { name: 'Notion', category: 'Productivity' },
+  { name: 'Linear', category: 'Productivity' },
+  { name: 'Stripe', category: 'Finance' },
+  { name: 'Vercel', category: 'Developer' },
+  { name: 'Cloudflare', category: 'Developer' },
+  { name: 'Sentry', category: 'Developer' },
+  { name: 'Figma', category: 'Design' },
+  { name: 'HubSpot', category: 'Marketing' },
+  { name: 'PayPal', category: 'Finance' },
+  { name: 'PubMed', category: 'Research' },
+  { name: 'Atlassian', category: 'Developer' },
+  { name: 'Canva', category: 'Design' },
+  { name: 'Asana', category: 'Productivity' },
+  { name: 'Square', category: 'Finance' },
+  { name: 'Box', category: 'Productivity' },
+  { name: 'Intercom', category: 'Marketing' },
+];
 
-// Loading fallback component
-const PanelLoader = memo(function PanelLoader() {
+const categoryColors: Record<string, string> = {
+  Productivity: 'bg-emerald-500/8 text-emerald-400/90 border-emerald-500/12',
+  Developer: 'bg-violet-500/8 text-violet-400/90 border-violet-500/12',
+  Finance: 'bg-amber-500/8 text-amber-400/90 border-amber-500/12',
+  Design: 'bg-sky-500/8 text-sky-400/90 border-sky-500/12',
+  Marketing: 'bg-rose-500/8 text-rose-400/90 border-rose-500/12',
+  Research: 'bg-teal-500/8 text-teal-400/90 border-teal-500/12',
+};
+
+const steps = [
+  {
+    icon: Plus,
+    number: '01',
+    title: 'Add a server',
+    description: 'Enter a URL or choose from 50+ pre-configured integrations.',
+  },
+  {
+    icon: KeyRound,
+    number: '02',
+    title: 'Authenticate',
+    description: 'OAuth 2.0, bearer tokens, or no auth. PKCE handled automatically.',
+  },
+  {
+    icon: Rocket,
+    number: '03',
+    title: 'Start building',
+    description: 'Browse tools, read resources, use prompts, and chat with LLMs.',
+  },
+];
+
+export default function LandingPage() {
   return (
-    <div className="h-full flex items-center justify-center">
-      <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" />
-    </div>
-  );
-});
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] overflow-x-hidden">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:p-4 focus:bg-[var(--accent)] focus:text-white">Skip to content</a>
 
-// Memoized nav item component
-const NavItem = memo(function NavItem({
-  id,
-  label,
-  icon: Icon,
-  count,
-  isActive,
-  disabled,
-  collapsed,
-  onClick,
-}: {
-  id: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  count: number | null;
-  isActive: boolean;
-  disabled: boolean;
-  collapsed: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive
-        ? 'bg-[var(--accent)] text-white'
-        : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-    >
-      <Icon className="w-5 h-5 flex-shrink-0" />
-      {!collapsed && (
-        <>
-          <span className="flex-1 text-left">{label}</span>
-          {count !== null && count > 0 && (
-            <span className={`px-2 py-0.5 rounded-full text-xs ${isActive
-              ? 'bg-white/20 text-white'
-              : 'bg-[var(--background-tertiary)] text-[var(--foreground-muted)]'
-              }`}>
-              {count}
-            </span>
-          )}
-        </>
-      )}
-    </button>
-  );
-});
-
-export default function Home() {
-  const { data: session, status: authStatus } = useSession();
-  const [activePanel, setActivePanel] = useState<ActivePanel>('chat');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [pendingOAuthServer, setPendingOAuthServer] = useState<string | null>(null);
-  const [showAddServerModal, setShowAddServerModal] = useState(false);
-  const [isAddingServer, setIsAddingServer] = useState(false);
-  const urlServersProcessedRef = useRef(false);
-
-  // LLM settings for sampling
-  const { settings: llmSettings } = useLLMSettings();
-
-  const {
-    registerClient,
-    startOAuth,
-  } = useOAuth();
-
-  // These refs will be set after useMultiServerMcp — use temp callbacks
-  const samplingFlowRef = { current: null as ReturnType<typeof useSamplingFlow> | null };
-  const elicitationFlowRef = { current: null as ReturnType<typeof useElicitationFlow> | null };
-
-  const {
-    servers,
-    activeServerId,
-    activeServer,
-    setActiveServerId,
-    addServer,
-    connectServer,
-    disconnectServer,
-    removeServer,
-    editServer,
-    callTool,
-    callToolOnServer,
-    readResource,
-    getPrompt,
-    getAllTools,
-    respondToSamplingRequest,
-    respondToElicitationRequest,
-  } = useMultiServerMcp({
-    onError: useCallback((serverId: string, error: Error) => {
-      toast.error(error.message);
-    }, []),
-    onSamplingRequest: useCallback((request: SamplingRequest) => {
-      samplingFlowRef.current?.onSamplingRequest(request);
-    }, []),
-    onElicitationRequest: useCallback((request: ElicitationRequest) => {
-      elicitationFlowRef.current?.onElicitationRequest(request);
-    }, []),
-  });
-
-  // Sampling flow (extracted hook)
-  const samplingFlow = useSamplingFlow({
-    respondToSamplingRequest,
-    llmSettings,
-  });
-  samplingFlowRef.current = samplingFlow;
-
-  // Elicitation flow (extracted hook)
-  const elicitationFlow = useElicitationFlow({
-    respondToElicitationRequest,
-  });
-  elicitationFlowRef.current = elicitationFlow;
-
-  // Server sync with D1 database
-  const { saveServer, deleteServer: deleteServerFromDb, isAuthenticated } = useServerSync({
-    onServersLoaded: useCallback(async (cloudServers: { id: string; name: string; url: string }[]) => {
-      // Merge cloud servers with local - cloud takes precedence
-      for (const cloudServer of cloudServers) {
-        const existingServer = servers.find(s => s.id === cloudServer.id || s.url === cloudServer.url);
-        if (!existingServer) {
-          // Add server from cloud, preserving the D1 ID
-          await addServer({ url: cloudServer.url, name: cloudServer.name, existingId: cloudServer.id });
-        }
-      }
-      if (cloudServers.length > 0) {
-        toast.success('Servers synced from cloud');
-      }
-    }, [servers, addServer]),
-  });
-
-  // Handle OAuth success from popup
-  useEffect(() => {
-    const handleMessage = async (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-
-      if (event.data.type === 'oauth-success') {
-        const { serverUrl, accessToken, tokenType } = event.data;
-
-        try {
-          let serverId = pendingOAuthServer;
-          if (!serverId) {
-            const existingServer = servers.find(s => s.url === serverUrl);
-            if (existingServer) {
-              serverId = existingServer.id;
-            } else {
-              serverId = await addServer({ url: serverUrl });
-            }
-          }
-
-          if (serverId) {
-            await connectServer(serverId, { accessToken, tokenType });
-          }
-        } catch (error) {
-          // Error handled by onError callback
-        } finally {
-          setPendingOAuthServer(null);
-        }
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [addServer, connectServer, pendingOAuthServer, servers]);
-
-  const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType, customHeaders?: Record<string, string>): Promise<string> => {
-    const serverId = await addServer({ url, name, credentials, transport, customHeaders });
-
-    // Sync to D1 if authenticated
-    if (isAuthenticated) {
-      await saveServer({ id: serverId, name: name || url, url });
-    }
-
-    return serverId;
-  }, [addServer, isAuthenticated, saveServer]);
-
-  const handleConnectServer = useCallback(async (serverId: string, credentials?: OAuthCredentials) => {
-    const server = servers.find(s => s.id === serverId);
-    if (!server) return;
-
-    try {
-      await connectServer(serverId, credentials || server.credentials);
-    } catch {
-      // Error handled by onError callback
-    }
-  }, [servers, connectServer]);
-
-  const handleStartOAuth = useCallback(async (serverUrl: string, serverId?: string): Promise<{ success: boolean; error?: string }> => {
-    if (serverId) {
-      setPendingOAuthServer(serverId);
-    } else {
-      const existingServer = servers.find(s => s.url === serverUrl);
-      if (existingServer) {
-        setPendingOAuthServer(existingServer.id);
-      }
-    }
-    return await startOAuth(serverUrl);
-  }, [servers, startOAuth]);
-
-  const handleRegisterClient = useCallback(async (serverUrl: string): Promise<{ success: boolean; clientId?: string; error?: string }> => {
-    return await registerClient(serverUrl);
-  }, [registerClient]);
-
-  // Handler for direct modal add (used when adding server from empty state)
-  const handleDirectAddServer = useCallback(async (url: string, name: string, authType: 'none' | 'bearer' | 'oauth', bearerToken?: string, transport?: TransportType) => {
-    setIsAddingServer(true);
-    try {
-      let credentials: OAuthCredentials | undefined;
-
-      if (authType === 'bearer' && bearerToken) {
-        credentials = {
-          accessToken: bearerToken,
-          tokenType: 'Bearer',
-        };
-      }
-
-      const serverId = await addServer({ url, name: name || undefined, credentials, transport });
-
-      // Sync to D1 if authenticated
-      if (isAuthenticated) {
-        await saveServer({ id: serverId, name: name || url, url, authType });
-      }
-
-      // Auto-connect with credentials if provided
-      if (authType !== 'oauth') {
-        await connectServer(serverId, credentials);
-      }
-      setShowAddServerModal(false);
-    } catch (error) {
-      console.error('Failed to add server:', error);
-    } finally {
-      setIsAddingServer(false);
-    }
-  }, [addServer, connectServer, isAuthenticated, saveServer]);
-
-  // Handler for removing server (with D1 sync)
-  const handleRemoveServer = useCallback(async (serverId: string) => {
-    removeServer(serverId);
-    if (isAuthenticated) {
-      await deleteServerFromDb(serverId);
-    }
-  }, [removeServer, isAuthenticated, deleteServerFromDb]);
-
-  const handleDisconnect = useCallback(() => {
-    if (activeServer) {
-      disconnectServer(activeServer.id);
-    }
-  }, [activeServer, disconnectServer]);
-
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed(prev => !prev);
-  }, []);
-
-  // Parse URL hash to auto-add & connect servers
-  // Format: https://mcphost.link/#server1.com/sse,server2.com/mcp
-  useEffect(() => {
-    if (urlServersProcessedRef.current) return;
-    const hash = window.location.hash.slice(1); // remove #
-    if (!hash) return;
-    urlServersProcessedRef.current = true;
-
-    // Clean the URL without reloading
-    window.history.replaceState({}, '', window.location.pathname);
-
-    const entries = hash.split(',').map(s => s.trim()).filter(Boolean);
-    if (entries.length === 0) return;
-
-    // Restore full URLs: assume https:// unless http:// is explicit
-    const urls = entries.map(s => {
-      if (s.startsWith('http://') || s.startsWith('https://')) return s;
-      return `https://${s}`;
-    });
-
-    const addServersFromUrl = async () => {
-      let added = 0;
-      for (const url of urls) {
-        const exists = servers.find(s => s.url === url);
-        if (exists) {
-          if (exists.status === 'disconnected') {
-            try { await connectServer(exists.id); } catch { /* handled by onError */ }
-          }
-          continue;
-        }
-        try {
-          const serverId = await addServer({ url });
-          await connectServer(serverId);
-          added++;
-        } catch {
-          // handled by onError
-        }
-      }
-      if (added > 0) {
-        toast.success(`Added ${added} server${added > 1 ? 's' : ''} from shared link`);
-      }
-    };
-
-    addServersFromUrl();
-  }, [servers, addServer, connectServer]);
-
-  // Generate shareable URL with current servers
-  const handleShareServers = useCallback(async () => {
-    if (servers.length === 0) {
-      toast.error('No servers to share');
-      return;
-    }
-    // Strip https:// for cleaner URLs, keep http:// if non-standard
-    const shortUrls = servers.map(s =>
-      s.url.startsWith('https://') ? s.url.slice(8) : s.url
-    );
-    const shareUrl = `${window.location.origin}/#${shortUrls.join(',')}`;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      toast.success('Shareable link copied to clipboard!');
-    } catch {
-      prompt('Copy this link:', shareUrl);
-    }
-  }, [servers]);
-
-  const isConnected = activeServer?.status === 'connected';
-  const connectedServersCount = servers.filter(s => s.status === 'connected').length;
-
-  // Get tools from ALL connected servers for the chat
-  const allTools = getAllTools();
-  // Current server's resources and prompts (still per-server)
-  const currentResources = activeServer?.resources || [];
-  const currentPrompts = activeServer?.prompts || [];
-
-  // Handler to call tool on the correct server
-  const handleCallToolOnServer = useCallback(async (name: string, args: Record<string, unknown>, serverId?: string) => {
-    if (serverId) {
-      return await callToolOnServer(serverId, name, args);
-    }
-    // Fallback to active server if no serverId provided
-    return await callTool(name, args);
-  }, [callTool, callToolOnServer]);
-
-  // Tools for the active server (for the Tools panel)
-  const currentTools = activeServer?.tools || [];
-
-  const navItems = [
-    { id: 'chat' as const, label: 'Chat', icon: MessageSquare, count: null },
-    { id: 'tools' as const, label: 'Tools', icon: Wrench, count: currentTools.length },
-    { id: 'resources' as const, label: 'Resources', icon: FileText, count: currentResources.length },
-    { id: 'prompts' as const, label: 'Prompts', icon: BookOpen, count: currentPrompts.length },
-  ];
-
-  return (
-    <div className="h-screen flex flex-col md:flex-row overflow-hidden">
-      <Toaster
-        position="top-right"
-        richColors
-        theme="dark"
-        toastOptions={{
-          style: {
-            background: 'var(--background-secondary)',
-            border: '1px solid var(--border)',
-          },
-        }}
-      />
-
-      {/* Mobile Header */}
-      <header className="md:hidden h-14 flex items-center justify-between px-4 border-b border-[var(--border)] bg-[var(--background-secondary)] flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[var(--accent-muted)] flex items-center justify-center">
-            <Zap className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-semibold">MCPHost</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <a
-            href="https://github.com/hemanth/mcp-web-client"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--foreground-muted)]"
-            title="View on GitHub"
-          >
-            <Github className="w-5 h-5" />
-          </a>
-          <button
-            onClick={() => setMobileMenuOpen(true)}
-            className="p-2 hover:bg-[var(--background-tertiary)] rounded-lg"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-        </div>
-      </header>
-
-      {/* Mobile Drawer Overlay */}
-      {mobileMenuOpen && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/60 z-50"
-          onClick={() => setMobileMenuOpen(false)}
-        />
-      )}
-
-      {/* Mobile Drawer / Desktop Sidebar */}
-      <div className={`
-        fixed md:relative inset-y-0 left-0 z-50
-        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
-        ${sidebarCollapsed ? 'md:w-16' : 'w-72'}
-        bg-[var(--background-secondary)] border-r border-[var(--border)]
-        flex flex-col transition-transform duration-200 ease-out
-        md:flex-shrink-0
-      `}>
-        {/* Logo - Desktop only (mobile has header) */}
-        <div className="hidden md:flex items-center justify-between p-4 border-b border-[var(--border)]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-muted)] flex items-center justify-center">
-              <Zap className="w-5 h-5 text-white" />
-            </div>
-            {!sidebarCollapsed && (
-              <div>
-                <h1 className="font-bold text-lg gradient-text">MCPHost</h1>
-                <p className="text-xs text-[var(--foreground-muted)]">Multi-Server</p>
+      {/* Navigation — minimal, barely there */}
+      <nav className="fixed top-0 left-0 right-0 z-50 landing-nav">
+        <div className="max-w-6xl mx-auto px-5 sm:px-8">
+          <div className="flex items-center justify-between h-14">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-md bg-[var(--accent)] flex items-center justify-center">
+                <Zap className="w-3.5 h-3.5 text-[var(--background)]" />
               </div>
-            )}
-          </div>
-          <button
-            onClick={toggleSidebar}
-            className="p-1.5 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <div className={`transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}>
-              <ChevronLeft className="w-4 h-4" />
+              <span className="font-semibold text-sm tracking-tight">MCPHost</span>
             </div>
-          </button>
-        </div>
-
-        {/* Mobile Drawer Header */}
-        <div className="md:hidden flex items-center justify-between p-4 border-b border-[var(--border)]">
-          <span className="font-semibold">Servers</span>
-          <button
-            onClick={() => setMobileMenuOpen(false)}
-            className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-lg"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Server List */}
-        <div className="p-3 border-b border-[var(--border)] flex-shrink-0">
-          <ServerList
-            servers={servers}
-            activeServerId={activeServerId}
-            onSelectServer={(id) => {
-              setActiveServerId(id);
-              setMobileMenuOpen(false);
-            }}
-            onAddServer={handleAddServer}
-            onConnectServer={handleConnectServer}
-            onDisconnectServer={disconnectServer}
-            onRemoveServer={handleRemoveServer}
-            onEditServer={editServer}
-            onStartOAuth={handleStartOAuth}
-            onRegisterClient={handleRegisterClient}
-            onShareServers={handleShareServers}
-            collapsed={sidebarCollapsed}
-          />
-        </div>
-
-        {/* Navigation - Desktop only (mobile uses bottom nav) */}
-        <nav className="hidden md:block flex-1 p-3 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavItem
-              key={item.id}
-              id={item.id}
-              label={item.label}
-              icon={item.icon}
-              count={item.count}
-              isActive={activePanel === item.id}
-              disabled={!isConnected && item.id !== 'chat'}
-              collapsed={sidebarCollapsed}
-              onClick={() => setActivePanel(item.id)}
-            />
-          ))}
-        </nav>
-
-        {/* Server Info in Mobile Drawer */}
-        {isConnected && activeServer && (
-          <div className="md:hidden flex-1 p-3 overflow-y-auto border-t border-[var(--border)]">
-            <ServerInfo
-              serverInfo={activeServer.serverInfo}
-              capabilities={activeServer.capabilities}
-              toolsCount={currentTools.length}
-              resourcesCount={currentResources.length}
-              promptsCount={currentPrompts.length}
-            />
-            <button
-              onClick={() => {
-                handleDisconnect();
-                setMobileMenuOpen(false);
-              }}
-              className="w-full mt-4 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium"
-            >
-              Disconnect
-            </button>
-          </div>
-        )}
-
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        {/* Desktop Header */}
-        <header className="hidden md:flex h-14 items-center justify-between px-6 border-b border-[var(--border)] bg-[var(--background-secondary)]">
-          <div className="flex items-center gap-4">
-            <h2 className="font-semibold capitalize">{activePanel}</h2>
-            {/* Show active server for non-chat panels */}
-            {activePanel !== 'chat' && isConnected && activeServer && (
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--background-tertiary)] text-xs text-[var(--foreground-muted)]">
-                <Server className="w-3 h-3" />
-                {activeServer.serverInfo?.name || activeServer.name}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://github.com/hemanth/mcp-web-client"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2 rounded-lg text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)] transition-colors"
-              title="View on GitHub"
-            >
-              <Github className="w-5 h-5" />
-            </a>
-            {session ? (
-              <UserMenu />
-            ) : authStatus !== 'loading' && (
+            <div className="flex items-center gap-2">
               <a
-                href="/login"
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors"
+                href="https://github.com/hemanth/mcp-web-client"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 rounded-md text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
+                aria-label="View on GitHub"
               >
-                <LogIn className="w-4 h-4" />
-                Sign in
+                <Github className="w-4 h-4" />
               </a>
-            )}
+              <Link
+                href="/dashboard"
+                className="hidden sm:flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-[var(--foreground)] text-[var(--background)] text-sm font-medium hover:bg-[var(--foreground)]/90 transition-colors"
+              >
+                Launch App
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
-        </header>
+        </div>
+      </nav>
 
-        {/* Content Area */}
-        <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* Main Panel */}
-          <div className={`flex-1 p-4 md:p-6 overflow-y-auto contain-layout`}>
-            <div className="h-full">
-              <Suspense fallback={<PanelLoader />}>
-                {activePanel === 'chat' && (
-                  <ChatPanel
-                    tools={allTools}
-                    onCallTool={handleCallToolOnServer}
-                    disabled={connectedServersCount === 0}
-                    connectedServers={servers
-                      .filter(s => s.status === 'connected')
-                      .map(s => ({ id: s.id, name: s.serverInfo?.name || s.name }))}
-                  />
-                )}
+      <main id="main-content">
+        {/* Hero — typographic, restrained */}
+        <section className="relative pt-28 pb-16 sm:pt-36 sm:pb-24 px-5 sm:px-8">
+          <div className="hero-glow hero-glow-1" style={{ width: 700, height: 500 }} aria-hidden="true" />
+          <div className="hero-glow hero-glow-2" style={{ width: 400, height: 300 }} aria-hidden="true" />
+          <div className="hero-grid" aria-hidden="true" />
 
-                {activePanel === 'tools' && isConnected && (
-                  <ToolsPanel
-                    tools={currentTools}
-                    onCallTool={callTool}
-                    disabled={!isConnected}
-                  />
-                )}
+          <div className="relative max-w-3xl mx-auto">
+            {/* Badge */}
+            <div className="flex items-center gap-2 mb-8 sm:mb-10">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] pulse-glow" />
+              <span className="text-xs text-[var(--foreground-muted)] tracking-wide uppercase">Open Source · MIT</span>
+            </div>
 
-                {activePanel === 'resources' && isConnected && (
-                  <ResourcesPanel
-                    resources={currentResources}
-                    onReadResource={readResource}
-                    disabled={!isConnected}
-                  />
-                )}
+            {/* Heading — large, clean, great hierarchy */}
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.08] mb-5">
+              The universal client{' '}
+              <br className="hidden sm:block" />
+              for{' '}
+              <span className="hero-gradient-text">Model Context Protocol.</span>
+            </h1>
 
-                {activePanel === 'prompts' && isConnected && (
-                  <PromptsPanel
-                    prompts={currentPrompts}
-                    onGetPrompt={getPrompt}
-                    disabled={!isConnected}
-                  />
-                )}
+            {/* Subtitle — measured, no overselling */}
+            <p className="max-w-xl text-base sm:text-lg text-[var(--foreground-muted)] mb-8 leading-relaxed">
+              Connect to any MCP server from your browser. Browse tools, read resources, 
+              use prompts, and chat with LLMs — all in one place.
+            </p>
 
-                {/* Show prompt when non-chat panels selected without connection */}
-                {activePanel !== 'chat' && !isConnected && (
-                  <div className="flex flex-col items-center justify-center h-full text-center">
-                    <div className="w-16 h-16 md:w-20 md:h-20 mx-auto rounded-2xl bg-[var(--background-secondary)] flex items-center justify-center mb-4 md:mb-6">
-                      <Server className="w-8 h-8 md:w-10 md:h-10 text-[var(--foreground-muted)]" />
+            {/* CTAs — clean, high contrast */}
+            <div className="flex flex-col sm:flex-row items-start gap-3">
+              <Link
+                href="/dashboard"
+                className="group inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[var(--foreground)] text-[var(--background)] font-medium text-sm transition-all hover:opacity-90"
+              >
+                Launch App
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+              <a
+                href="https://github.com/hemanth/mcp-web-client"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[var(--border-hover)] text-[var(--foreground-muted)] font-medium text-sm transition-all hover:text-[var(--foreground)] hover:border-[var(--border-active)]"
+              >
+                <Github className="w-4 h-4" />
+                View Source
+                <ExternalLink className="w-3 h-3 opacity-40" />
+              </a>
+            </div>
+
+            {/* Tech pills — subtle */}
+            <div className="flex flex-wrap items-center gap-2 mt-10 text-xs text-[var(--foreground-subtle)]">
+              {['Next.js', 'TypeScript', 'MCP 2025-06-18', 'OAuth 2.0'].map((tech) => (
+                <span
+                  key={tech}
+                  className="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--background-secondary)]"
+                >
+                  {tech}
+                </span>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Features — grid, concise */}
+        <section className="py-16 sm:py-24 px-5 sm:px-8">
+          <div className="max-w-6xl mx-auto">
+            <div className="mb-12 sm:mb-14">
+              <p className="text-xs text-[var(--accent)] font-medium tracking-widest uppercase mb-3">Capabilities</p>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+                Everything you need for MCP.
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {features.map((feature) => {
+                const Icon = feature.icon;
+                return (
+                  <div
+                    key={feature.title}
+                    className="landing-card group reveal-on-scroll"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-[var(--accent)]/8 flex items-center justify-center mb-4">
+                      <Icon className="w-4.5 h-4.5 text-[var(--accent)]" />
                     </div>
-                    <h3 className="text-lg md:text-xl font-semibold mb-2 md:mb-3">Connect a Server</h3>
-                    <p className="text-sm md:text-base text-[var(--foreground-muted)]">
-                      Connect to an MCP server to use {activePanel}.
+                    <h3 className="text-sm font-semibold mb-1.5">{feature.title}</h3>
+                    <p className="text-sm text-[var(--foreground-muted)] leading-relaxed">
+                      {feature.description}
                     </p>
                   </div>
-                )}
-              </Suspense>
+                );
+              })}
             </div>
           </div>
+        </section>
 
-        </div>
+        {/* Integrations — clean pill cloud */}
+        <section className="py-16 sm:py-24 px-5 sm:px-8">
+          <div className="max-w-6xl mx-auto">
+            <div className="mb-12 sm:mb-14">
+              <p className="text-xs text-[var(--accent)] font-medium tracking-widest uppercase mb-3">Ecosystem</p>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+                50+ integrations, ready to connect.
+              </h2>
+            </div>
 
-        {/* Mobile Bottom Navigation */}
-        <nav className="md:hidden flex-shrink-0 border-t border-[var(--border)] bg-[var(--background-secondary)]">
-          <div className="flex">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activePanel === item.id;
-              const disabled = !isConnected && item.id !== 'chat';
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActivePanel(item.id)}
-                  disabled={disabled}
-                  className={`relative flex-1 flex flex-col items-center gap-1 py-2 text-xs ${isActive
-                    ? 'text-[var(--accent)]'
-                    : 'text-[var(--foreground-muted)]'
-                    } ${disabled ? 'opacity-50' : ''}`}
+            <div className="flex flex-wrap gap-2 mb-8 reveal-on-scroll">
+              {integrations.map((integration) => (
+                <span
+                  key={integration.name}
+                  className={`inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${categoryColors[integration.category] || 'bg-[var(--background-tertiary)] text-[var(--foreground-muted)] border-[var(--border)]'}`}
                 >
-                  <Icon className="w-5 h-5" />
-                  <span>{item.label}</span>
-                  {item.count !== null && item.count > 0 && (
-                    <span className={`absolute top-0.5 right-1/4 w-4 h-4 rounded-full text-[10px] flex items-center justify-center ${isActive ? 'bg-[var(--accent)] text-white' : 'bg-[var(--background-tertiary)]'
-                      }`}>
-                      {item.count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+                  {integration.name}
+                </span>
+              ))}
+            </div>
+
+            <div className="reveal-on-scroll">
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center gap-1.5 text-sm text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium transition-colors"
+              >
+                Browse all integrations
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
-        </nav>
-      </div>
+        </section>
 
-      {/* Error state overlay */}
-      {activeServer?.status === 'error' && activeServer.error && (
-        <div className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:max-w-md p-4 bg-red-500/10 border border-red-500/20 rounded-xl backdrop-blur-lg z-40">
-          <h3 className="font-medium text-red-400 mb-1">Connection Error</h3>
-          <p className="text-sm text-red-300/80">{activeServer.error}</p>
-        </div>
-      )}
+        {/* How it works — numbered, horizontal */}
+        <section className="py-16 sm:py-24 px-5 sm:px-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="mb-12 sm:mb-14">
+              <p className="text-xs text-[var(--accent)] font-medium tracking-widest uppercase mb-3">Getting Started</p>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+                Three steps. Under a minute.
+              </h2>
+            </div>
 
-      {/* Direct Add Server Modal (for mobile empty state) */}
-      {showAddServerModal && (
-        <AddServerModal
-          onAdd={handleDirectAddServer}
-          onAddServer={(url, name, transport, customHeaders) => handleAddServer(url, name, undefined, transport, customHeaders)}
-          onStartOAuth={handleStartOAuth}
-          onRegisterClient={handleRegisterClient}
-          onClose={() => setShowAddServerModal(false)}
-          isLoading={isAddingServer}
-        />
-      )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
+              {steps.map((step) => {
+                const Icon = step.icon;
+                return (
+                  <div key={step.number} className="reveal-on-scroll">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="text-xs font-mono text-[var(--accent)] font-semibold">{step.number}</span>
+                      <div className="h-px flex-1 bg-[var(--border)]" />
+                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-[var(--background-tertiary)] border border-[var(--border)] flex items-center justify-center mb-3">
+                      <Icon className="w-5 h-5 text-[var(--foreground-muted)]" />
+                    </div>
+                    <h3 className="text-sm font-semibold mb-1.5">{step.title}</h3>
+                    <p className="text-sm text-[var(--foreground-muted)] leading-relaxed">
+                      {step.description}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
 
-      {/* Sampling Request Modal */}
-      {samplingFlow.pendingRequest && (
-        <SamplingModal
-          request={samplingFlow.pendingRequest}
-          onApprove={samplingFlow.handleApprove}
-          onDeny={samplingFlow.handleDeny}
-          isProcessing={samplingFlow.isProcessing}
-          result={samplingFlow.result}
-        />
-      )}
+        {/* CTA — understated but clear */}
+        <section className="py-16 sm:py-24 px-5 sm:px-8">
+          <div className="max-w-2xl mx-auto reveal-on-scroll">
+            <div className="p-8 sm:p-12 rounded-2xl bg-[var(--background-secondary)] border border-[var(--border)]">
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+                Ready to connect?
+              </h2>
+              <p className="text-[var(--foreground-muted)] text-sm sm:text-base mb-6 leading-relaxed">
+                Launch the app and start connecting to MCP servers in seconds. No account required.
+              </p>
+              <Link
+                href="/dashboard"
+                className="group inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--background)] font-semibold text-sm transition-all hover:bg-[var(--accent-hover)]"
+              >
+                Launch MCPHost
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </div>
+          </div>
+        </section>
 
-      {/* Elicitation Request Modal */}
-      {elicitationFlow.pendingRequest && (
-        <ElicitationModal
-          request={elicitationFlow.pendingRequest}
-          onSubmit={elicitationFlow.handleSubmit}
-          onDecline={elicitationFlow.handleDecline}
-          onCancel={elicitationFlow.handleCancel}
-        />
-      )}
+        {/* Footer — one line, minimal */}
+        <footer className="py-6 px-5 sm:px-8 border-t border-[var(--border)]">
+          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[var(--foreground-subtle)]">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-[var(--accent)] flex items-center justify-center">
+                <Zap className="w-2.5 h-2.5 text-[var(--background)]" />
+              </div>
+              <span className="text-[var(--foreground-muted)] font-medium">MCPHost</span>
+              <span>·</span>
+              <span>Open Source MCP Client</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <a
+                href="https://github.com/hemanth/mcp-web-client"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-[var(--foreground-muted)] transition-colors"
+              >
+                GitHub
+              </a>
+              <a
+                href="https://modelcontextprotocol.io"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-[var(--foreground-muted)] transition-colors"
+              >
+                MCP Spec
+              </a>
+              <span>MIT License</span>
+            </div>
+          </div>
+        </footer>
+      </main>
     </div>
   );
 }

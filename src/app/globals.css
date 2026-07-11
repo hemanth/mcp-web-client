@@ -2,25 +2,36 @@
 @plugin "@tailwindcss/typography";
 
 :root {
-  --background: #09090b;
-  --background-secondary: #0f0f12;
-  --background-tertiary: #18181b;
-  --foreground: #fafafa;
-  --foreground-muted: #a1a1aa;
-  --accent: #0ea5e9;
-  --accent-hover: #38bdf8;
-  --accent-muted: #0284c7;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  --border: #27272a;
-  --border-hover: #3f3f46;
+  /* Warm dark palette — inspired by impeccable.style's restraint */
+  --background: #050505;
+  --background-secondary: #0c0c0c;
+  --background-tertiary: #141414;
+  --background-elevated: #1a1a1a;
+  --foreground: #e8e5e0;
+  --foreground-muted: #8a8680;
+  --foreground-subtle: #7e7a76;
+
+  /* Accent: warm amber-gold instead of cold blue */
+  --accent: #d4a853;
+  --accent-hover: #e8c06a;
+  --accent-muted: #b08d3e;
+
+  /* Functional colors */
+  --success: #5cb980;
+  --warning: #d4a853;
+  --error: #c95f4a;
+
+  /* Borders — warm-toned */
+  --border: #1e1e1e;
+  --border-hover: #2e2e2c;
+  --border-active: #3e3e3a;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  --font-sans: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: var(--font-mono), 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
 }
 
 html {
@@ -32,25 +43,26 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
+  letter-spacing: -0.01em;
 }
 
-/* Custom scrollbar - GPU accelerated */
+/* Custom scrollbar — minimal */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--background-secondary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-hover);
-  border-radius: 3px;
+  border-radius: 100px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--foreground-muted);
+  background: var(--foreground-subtle);
 }
 
 /* Hide scrollbar but keep functionality */
@@ -63,39 +75,38 @@ body {
   display: none;
 }
 
-/* Transitions only on interactive elements - avoid layout thrashing */
+/* Transitions only on interactive elements */
 button,
 a,
 input,
 textarea,
 select,
 [role="button"] {
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease, transform 150ms ease;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
 }
 
-/* GPU-accelerated transforms for animations */
+/* GPU-accelerated transforms */
 .will-change-transform {
   will-change: transform;
 }
 
-/* Glow effects */
+/* Subtle glow effects — warm tones */
 .glow-accent {
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
+  box-shadow: 0 0 24px rgba(212, 168, 83, 0.15);
 }
 
 .glow-success {
-  box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  box-shadow: 0 0 24px rgba(92, 185, 128, 0.15);
 }
 
-/* Glass morphism - use GPU */
+/* Glass morphism — warm */
 .glass {
-  background: rgba(18, 18, 26, 0.8);
-  backdrop-filter: blur(12px);
+  background: rgba(12, 12, 12, 0.85);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--border);
-  transform: translateZ(0);
 }
 
-/* Gradient text */
+/* Gradient text — warm spectrum */
 .gradient-text {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
   -webkit-background-clip: text;
@@ -103,15 +114,15 @@ select,
   background-clip: text;
 }
 
-/* Pulse animation - GPU accelerated */
+/* Pulse animation */
 @keyframes pulse-glow {
   0%, 100% {
     opacity: 1;
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+    box-shadow: 0 0 0 0 rgba(92, 185, 128, 0.3);
   }
   50% {
     opacity: 0.8;
-    box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+    box-shadow: 0 0 0 6px rgba(92, 185, 128, 0);
   }
 }
 
@@ -135,13 +146,12 @@ select,
   }
 }
 
-/* Content visibility for off-screen elements */
+/* Content visibility */
 .content-auto {
   content-visibility: auto;
   contain-intrinsic-size: 0 500px;
 }
 
-/* Optimize rendering */
 .contain-layout {
   contain: layout;
 }
@@ -150,7 +160,7 @@ select,
   contain: paint;
 }
 
-/* Skeleton loading placeholder */
+/* Skeleton loading */
 .skeleton {
   background: linear-gradient(
     90deg,
@@ -168,5 +178,171 @@ select,
   }
   100% {
     background-position: -200% 0;
+  }
+}
+
+/* ========================================
+   Landing Page Styles
+   ======================================== */
+
+/* Navigation — barely-there glass */
+.landing-nav {
+  background: rgba(5, 5, 5, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* Hero gradient text — warm gold shimmer */
+.hero-gradient-text {
+  background: linear-gradient(
+    135deg,
+    var(--accent-hover) 0%,
+    var(--accent) 40%,
+    var(--foreground) 60%,
+    var(--accent-hover) 100%
+  );
+  background-size: 300% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 6s ease-in-out infinite;
+}
+
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% center;
+  }
+  50% {
+    background-position: 300% center;
+  }
+}
+
+/* Hero background glow — warm, restrained */
+.hero-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(140px);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.hero-glow-1 {
+  width: 700px;
+  height: 500px;
+  background: var(--accent);
+  top: -200px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: glow-pulse-1 8s ease-in-out infinite;
+}
+
+.hero-glow-2 {
+  width: 400px;
+  height: 300px;
+  background: #c95f4a;
+  top: -80px;
+  right: 15%;
+  animation: glow-pulse-2 10s ease-in-out infinite;
+}
+
+@keyframes glow-pulse-1 {
+  0%, 100% {
+    opacity: 0.06;
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    opacity: 0.1;
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
+@keyframes glow-pulse-2 {
+  0%, 100% {
+    opacity: 0.04;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.08;
+    transform: scale(1.08);
+  }
+}
+
+/* Subtle dot grid pattern */
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+  mask-image: radial-gradient(ellipse at center, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 20%, transparent 75%);
+}
+
+/* Feature cards — restrained glass */
+.landing-card {
+  padding: 2rem;
+  border-radius: 0.875rem;
+  background: rgba(12, 12, 12, 0.5);
+  border: 1px solid var(--border);
+  transition: border-color 250ms ease, transform 250ms ease;
+}
+
+.landing-card:hover {
+  border-color: var(--border-active);
+  transform: translateY(-1px);
+}
+
+/* Scroll-driven reveal (progressive enhancement) */
+@media (prefers-reduced-motion: no-preference) {
+  @supports ((animation-timeline: view()) and (animation-range: entry)) {
+    @keyframes reveal-up {
+      from {
+        opacity: 0;
+        transform: translateY(24px);
+      }
+    }
+
+    .reveal-on-scroll {
+      animation: reveal-up auto linear backwards;
+      animation-timeline: view();
+      animation-range: entry 0% entry 25%;
+    }
+  }
+
+  @supports not ((animation-timeline: view()) and (animation-range: entry)) {
+    @keyframes fade-in-up {
+      from {
+        opacity: 0;
+        transform: translateY(16px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .reveal-on-scroll {
+      animation: fade-in-up 0.5s ease-out both;
+    }
+  }
+}
+
+/* Disable all landing animations for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .hero-gradient-text {
+    animation: none;
+  }
+
+  .hero-glow {
+    animation: none;
+  }
+
+  .reveal-on-scroll {
+    animation: none;
+  }
+
+  .landing-card {
+    transition: none;
   }
 }

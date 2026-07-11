@@ -31,6 +31,14 @@ export interface MCPInitializeResult {
   serverInfo: MCPServerInfo;
 }
 
+export interface MCPToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 export interface MCPTool {
   name: string;
   description?: string;
@@ -39,10 +47,19 @@ export interface MCPTool {
     properties?: Record<string, unknown>;
     required?: string[];
   };
+  outputSchema?: Record<string, unknown>;
+  annotations?: MCPToolAnnotations;
 }
 
 export interface MCPResource {
   uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export interface MCPResourceTemplate {
+  uriTemplate: string;
   name: string;
   description?: string;
   mimeType?: string;
@@ -129,14 +146,27 @@ export interface ConnectionState {
 
 // Tool Execution
 
+export interface ResourceLinkContent {
+  type: 'resource_link';
+  uri: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
+}
+
 export interface ToolCallResult {
   content: Array<{
     type: string;
     text?: string;
     data?: string;
     mimeType?: string;
-  }>;
+    // resource_link fields
+    uri?: string;
+    name?: string;
+    description?: string;
+  } | ResourceLinkContent>;
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 }
 
 // Resource Content Types
@@ -158,6 +188,29 @@ export type TransportType = 'sse' | 'streamable-http';
 
 // Multi-Server Types
 
+// Progress Notification
+export interface MCPProgressNotification {
+  progressToken: string | number;
+  progress: number;
+  total?: number;
+  message?: string;
+}
+
+// Log Message
+export interface MCPLogMessage {
+  level: 'debug' | 'info' | 'notice' | 'warning' | 'error' | 'critical' | 'alert' | 'emergency';
+  logger?: string;
+  data: unknown;
+  timestamp: number;
+}
+
+// Completion Result
+export interface MCPCompletionResult {
+  values: string[];
+  total?: number;
+  hasMore?: boolean;
+}
+
 export interface ServerInstance {
   id: string;
   url: string;
@@ -169,9 +222,12 @@ export interface ServerInstance {
   capabilities?: MCPCapabilities;
   tools: MCPTool[];
   resources: MCPResource[];
+  resourceTemplates: MCPResourceTemplate[];
   prompts: MCPPrompt[];
   credentials?: OAuthCredentials;
   customHeaders?: Record<string, string>;
+  logMessages: MCPLogMessage[];
+  activeProgress: Map<string | number, MCPProgressNotification>;
 }
 
 // Sampling Types (Server requests LLM completion from client)

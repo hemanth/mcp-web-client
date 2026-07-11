@@ -1,0 +1,718 @@
+'use client';
+
+import { useEffect, useState, useCallback, useRef, Suspense, lazy, memo } from 'react';
+import { Toaster, toast } from 'sonner';
+import { useSession } from 'next-auth/react';
+import { useMultiServerMcp } from '@/lib/useMultiServerMcp';
+import { useOAuth } from '@/lib/useOAuth';
+import { useServerSync } from '@/lib/useServerSync';
+import { useSamplingFlow } from '@/lib/useSamplingFlow';
+import { useElicitationFlow } from '@/lib/useElicitationFlow';
+import { ServerList, AddServerModal } from '@/components/ServerList';
+import { ServerInfo } from '@/components/ServerInfo';
+import { SamplingModal } from '@/components/SamplingModal';
+import { ElicitationModal } from '@/components/ElicitationModal';
+import { useLLMSettings } from '@/components/LLMSettings';
+import { UserMenu } from '@/components/UserMenu';
+import type { OAuthCredentials, TransportType, SamplingRequest, ElicitationRequest } from '@/lib/types';
+import {
+  MessageSquare,
+  Wrench,
+  FileText,
+  BookOpen,
+  Zap,
+  ChevronLeft,
+  ChevronRight,
+  Server,
+  Loader2,
+  Menu,
+  X,
+  Github,
+  LogIn,
+} from 'lucide-react';
+
+// Dynamic imports for code splitting - panels are lazy loaded
+const ChatPanel = lazy(() => import('@/components/ChatPanel').then(m => ({ default: m.ChatPanel })));
+const ToolsPanel = lazy(() => import('@/components/ToolsPanel').then(m => ({ default: m.ToolsPanel })));
+const ResourcesPanel = lazy(() => import('@/components/ResourcesPanel').then(m => ({ default: m.ResourcesPanel })));
+const PromptsPanel = lazy(() => import('@/components/PromptsPanel').then(m => ({ default: m.PromptsPanel })));
+
+type ActivePanel = 'chat' | 'tools' | 'resources' | 'prompts';
+
+// Loading fallback component
+const PanelLoader = memo(function PanelLoader() {
+  return (
+    <div className="h-full flex items-center justify-center">
+      <Loader2 className="w-8 h-8 animate-spin text-[var(--accent)]" />
+    </div>
+  );
+});
+
+// Memoized nav item component
+const NavItem = memo(function NavItem({
+  id,
+  label,
+  icon: Icon,
+  count,
+  isActive,
+  disabled,
+  collapsed,
+  onClick,
+}: {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  count: number | null;
+  isActive: boolean;
+  disabled: boolean;
+  collapsed: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive
+        ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+        : 'text-[var(--foreground-muted)] hover:text-[var(--foreground)] hover:bg-[var(--background-tertiary)]'
+        } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+    >
+      <Icon className="w-4.5 h-4.5 flex-shrink-0" />
+      {!collapsed && (
+        <>
+          <span className="flex-1 text-left">{label}</span>
+          {count !== null && count > 0 && (
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${isActive
+              ? 'text-[var(--accent)]'
+              : 'text-[var(--foreground-subtle)]'
+              }`}>
+              {count}
+            </span>
+          )}
+        </>
+      )}
+    </button>
+  );
+});
+
+export default function Dashboard() {
+  const { data: session, status: authStatus } = useSession();
+  const [activePanel, setActivePanel] = useState<ActivePanel>('chat');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [pendingOAuthServer, setPendingOAuthServer] = useState<string | null>(null);
+  const [showAddServerModal, setShowAddServerModal] = useState(false);
+  const [isAddingServer, setIsAddingServer] = useState(false);
+  const urlServersProcessedRef = useRef(false);
+
+  // LLM settings for sampling
+  const { settings: llmSettings } = useLLMSettings();
+
+  const {
+    registerClient,
+    startOAuth,
+  } = useOAuth();
+
+  // These refs will be set after useMultiServerMcp — use temp callbacks
+  const samplingFlowRef = { current: null as ReturnType<typeof useSamplingFlow> | null };
+  const elicitationFlowRef = { current: null as ReturnType<typeof useElicitationFlow> | null };
+
+  const {
+    servers,
+    activeServerId,
+    activeServer,
+    setActiveServerId,
+    addServer,
+    connectServer,
+    disconnectServer,
+    removeServer,
+    editServer,
+    callTool,
+    callToolOnServer,
+    readResource,
+    getPrompt,
+    getAllTools,
+    respondToSamplingRequest,
+    respondToElicitationRequest,
+  } = useMultiServerMcp({
+    onError: useCallback((serverId: string, error: Error) => {
+      toast.error(error.message);
+    }, []),
+    onSamplingRequest: useCallback((request: SamplingRequest) => {
+      samplingFlowRef.current?.onSamplingRequest(request);
+    }, []),
+    onElicitationRequest: useCallback((request: ElicitationRequest) => {
+      elicitationFlowRef.current?.onElicitationRequest(request);
+    }, []),
+  });
+
+  // Sampling flow (extracted hook)
+  const samplingFlow = useSamplingFlow({
+    respondToSamplingRequest,
+    llmSettings,
+  });
+  samplingFlowRef.current = samplingFlow;
+
+  // Elicitation flow (extracted hook)
+  const elicitationFlow = useElicitationFlow({
+    respondToElicitationRequest,
+  });
+  elicitationFlowRef.current = elicitationFlow;
+
+  // Server sync with D1 database
+  const { saveServer, deleteServer: deleteServerFromDb, isAuthenticated } = useServerSync({
+    onServersLoaded: useCallback(async (cloudServers: { id: string; name: string; url: string }[]) => {
+      // Merge cloud servers with local - cloud takes precedence
+      for (const cloudServer of cloudServers) {
+        const existingServer = servers.find(s => s.id === cloudServer.id || s.url === cloudServer.url);
+        if (!existingServer) {
+          // Add server from cloud, preserving the D1 ID
+          await addServer({ url: cloudServer.url, name: cloudServer.name, existingId: cloudServer.id });
+        }
+      }
+      if (cloudServers.length > 0) {
+        toast.success('Servers synced from cloud');
+      }
+    }, [servers, addServer]),
+  });
+
+  // Handle OAuth success from popup
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+
+      if (event.data.type === 'oauth-success') {
+        const { serverUrl, accessToken, tokenType } = event.data;
+
+        try {
+          let serverId = pendingOAuthServer;
+          if (!serverId) {
+            const existingServer = servers.find(s => s.url === serverUrl);
+            if (existingServer) {
+              serverId = existingServer.id;
+            } else {
+              serverId = await addServer({ url: serverUrl });
+            }
+          }
+
+          if (serverId) {
+            await connectServer(serverId, { accessToken, tokenType });
+          }
+        } catch (error) {
+          // Error handled by onError callback
+        } finally {
+          setPendingOAuthServer(null);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [addServer, connectServer, pendingOAuthServer, servers]);
+
+  const handleAddServer = useCallback(async (url: string, name?: string, credentials?: OAuthCredentials, transport?: TransportType, customHeaders?: Record<string, string>): Promise<string> => {
+    const serverId = await addServer({ url, name, credentials, transport, customHeaders });
+
+    // Sync to D1 if authenticated
+    if (isAuthenticated) {
+      await saveServer({ id: serverId, name: name || url, url });
+    }
+
+    return serverId;
+  }, [addServer, isAuthenticated, saveServer]);
+
+  const handleConnectServer = useCallback(async (serverId: string, credentials?: OAuthCredentials) => {
+    const server = servers.find(s => s.id === serverId);
+    if (!server) return;
+
+    try {
+      await connectServer(serverId, credentials || server.credentials);
+    } catch {
+      // Error handled by onError callback
+    }
+  }, [servers, connectServer]);
+
+  const handleStartOAuth = useCallback(async (serverUrl: string, serverId?: string): Promise<{ success: boolean; error?: string }> => {
+    if (serverId) {
+      setPendingOAuthServer(serverId);
+    } else {
+      const existingServer = servers.find(s => s.url === serverUrl);
+      if (existingServer) {
+        setPendingOAuthServer(existingServer.id);
+      }
+    }
+    return await startOAuth(serverUrl);
+  }, [servers, startOAuth]);
+
+  const handleRegisterClient = useCallback(async (serverUrl: string): Promise<{ success: boolean; clientId?: string; error?: string }> => {
+    return await registerClient(serverUrl);
+  }, [registerClient]);
+
+  // Handler for direct modal add (used when adding server from empty state)
+  const handleDirectAddServer = useCallback(async (url: string, name: string, authType: 'none' | 'bearer' | 'oauth', bearerToken?: string, transport?: TransportType) => {
+    setIsAddingServer(true);
+    try {
+      let credentials: OAuthCredentials | undefined;
+
+      if (authType === 'bearer' && bearerToken) {
+        credentials = {
+          accessToken: bearerToken,
+          tokenType: 'Bearer',
+        };
+      }
+
+      const serverId = await addServer({ url, name: name || undefined, credentials, transport });
+
+      // Sync to D1 if authenticated
+      if (isAuthenticated) {
+        await saveServer({ id: serverId, name: name || url, url, authType });
+      }
+
+      // Auto-connect with credentials if provided
+      if (authType !== 'oauth') {
+        await connectServer(serverId, credentials);
+      }
+      setShowAddServerModal(false);
+    } catch (error) {
+      console.error('Failed to add server:', error);
+    } finally {
+      setIsAddingServer(false);
+    }
+  }, [addServer, connectServer, isAuthenticated, saveServer]);
+
+  // Handler for removing server (with D1 sync)
+  const handleRemoveServer = useCallback(async (serverId: string) => {
+    removeServer(serverId);
+    if (isAuthenticated) {
+      await deleteServerFromDb(serverId);
+    }
+  }, [removeServer, isAuthenticated, deleteServerFromDb]);
+
+  const handleDisconnect = useCallback(() => {
+    if (activeServer) {
+      disconnectServer(activeServer.id);
+    }
+  }, [activeServer, disconnectServer]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => !prev);
+  }, []);
+
+  // Parse URL hash to auto-add & connect servers
+  // Format: https://mcphost.link/#server1.com/sse,server2.com/mcp
+  useEffect(() => {
+    if (urlServersProcessedRef.current) return;
+    const hash = window.location.hash.slice(1); // remove #
+    if (!hash) return;
+    urlServersProcessedRef.current = true;
+
+    // Clean the URL without reloading
+    window.history.replaceState({}, '', window.location.pathname);
+
+    const entries = hash.split(',').map(s => s.trim()).filter(Boolean);
+    if (entries.length === 0) return;
+
+    // Restore full URLs: assume https:// unless http:// is explicit
+    const urls = entries.map(s => {
+      if (s.startsWith('http://') || s.startsWith('https://')) return s;
+      return `https://${s}`;
+    });
+
+    const addServersFromUrl = async () => {
+      let added = 0;
+      for (const url of urls) {
+        const exists = servers.find(s => s.url === url);
+        if (exists) {
+          if (exists.status === 'disconnected') {
+            try { await connectServer(exists.id); } catch { /* handled by onError */ }
+          }
+          continue;
+        }
+        try {
+          const serverId = await addServer({ url });
+          await connectServer(serverId);
+          added++;
+        } catch {
+          // handled by onError
+        }
+      }
+      if (added > 0) {
+        toast.success(`Added ${added} server${added > 1 ? 's' : ''} from shared link`);
+      }
+    };
+
+    addServersFromUrl();
+  }, [servers, addServer, connectServer]);
+
+  // Generate shareable URL with current servers
+  const handleShareServers = useCallback(async () => {
+    if (servers.length === 0) {
+      toast.error('No servers to share');
+      return;
+    }
+    // Strip https:// for cleaner URLs, keep http:// if non-standard
+    const shortUrls = servers.map(s =>
+      s.url.startsWith('https://') ? s.url.slice(8) : s.url
+    );
+    const shareUrl = `${window.location.origin}/#${shortUrls.join(',')}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success('Shareable link copied to clipboard!');
+    } catch {
+      prompt('Copy this link:', shareUrl);
+    }
+  }, [servers]);
+
+  const isConnected = activeServer?.status === 'connected';
+  const connectedServersCount = servers.filter(s => s.status === 'connected').length;
+
+  // Get tools from ALL connected servers for the chat
+  const allTools = getAllTools();
+  // Current server's resources and prompts (still per-server)
+  const currentResources = activeServer?.resources || [];
+  const currentPrompts = activeServer?.prompts || [];
+
+  // Handler to call tool on the correct server
+  const handleCallToolOnServer = useCallback(async (name: string, args: Record<string, unknown>, serverId?: string) => {
+    if (serverId) {
+      return await callToolOnServer(serverId, name, args);
+    }
+    // Fallback to active server if no serverId provided
+    return await callTool(name, args);
+  }, [callTool, callToolOnServer]);
+
+  // Tools for the active server (for the Tools panel)
+  const currentTools = activeServer?.tools || [];
+
+  const navItems = [
+    { id: 'chat' as const, label: 'Chat', icon: MessageSquare, count: null },
+    { id: 'tools' as const, label: 'Tools', icon: Wrench, count: currentTools.length },
+    { id: 'resources' as const, label: 'Resources', icon: FileText, count: currentResources.length },
+    { id: 'prompts' as const, label: 'Prompts', icon: BookOpen, count: currentPrompts.length },
+  ];
+
+  return (
+    <div className="h-screen flex flex-col md:flex-row overflow-hidden">
+      <Toaster
+        position="top-right"
+        richColors
+        theme="dark"
+        toastOptions={{
+          style: {
+            background: 'var(--background-secondary)',
+            border: '1px solid var(--border)',
+          },
+        }}
+      />
+
+      {/* Mobile Header */}
+      <header className="md:hidden h-12 flex items-center justify-between px-4 border-b border-[var(--border)] bg-[var(--background)] flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded bg-[var(--accent)] flex items-center justify-center">
+            <Zap className="w-3 h-3 text-[var(--background)]" />
+          </div>
+          <span className="font-semibold text-sm">MCPHost</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <a
+            href="https://github.com/hemanth/mcp-web-client"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--foreground-muted)]"
+            title="View on GitHub"
+          >
+            <Github className="w-4 h-4" />
+          </a>
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-2 hover:bg-[var(--background-tertiary)] rounded-md"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile Drawer Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/60 z-50"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Mobile Drawer / Desktop Sidebar */}
+      <div className={`
+        fixed md:relative inset-y-0 left-0 z-50
+        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+        ${sidebarCollapsed ? 'md:w-14' : 'w-64'}
+        bg-[var(--background)] border-r border-[var(--border)]
+        flex flex-col transition-transform duration-200 ease-out
+        md:flex-shrink-0
+      `}>
+        {/* Logo - Desktop only */}
+        <div className="hidden md:flex items-center justify-between px-3 py-3 border-b border-[var(--border)]">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-[var(--accent)] flex items-center justify-center flex-shrink-0">
+              <Zap className="w-3.5 h-3.5 text-[var(--background)]" />
+            </div>
+            {!sidebarCollapsed && (
+              <div>
+                <h1 className="font-semibold text-sm tracking-tight">MCPHost</h1>
+                <p className="text-[10px] text-[var(--foreground-subtle)]">MCP Client</p>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={toggleSidebar}
+            className="p-1 rounded-md text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)] transition-colors"
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <div className={`transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}>
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </div>
+          </button>
+        </div>
+
+        {/* Mobile Drawer Header */}
+        <div className="md:hidden flex items-center justify-between p-4 border-b border-[var(--border)]">
+          <span className="font-semibold">Servers</span>
+          <button
+            onClick={() => setMobileMenuOpen(false)}
+            className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-lg"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Server List */}
+        <div className="p-3 border-b border-[var(--border)] flex-shrink-0">
+          <ServerList
+            servers={servers}
+            activeServerId={activeServerId}
+            onSelectServer={(id) => {
+              setActiveServerId(id);
+              setMobileMenuOpen(false);
+            }}
+            onAddServer={handleAddServer}
+            onConnectServer={handleConnectServer}
+            onDisconnectServer={disconnectServer}
+            onRemoveServer={handleRemoveServer}
+            onEditServer={editServer}
+            onStartOAuth={handleStartOAuth}
+            onRegisterClient={handleRegisterClient}
+            onShareServers={handleShareServers}
+            collapsed={sidebarCollapsed}
+          />
+        </div>
+
+        {/* Navigation - Desktop only (mobile uses bottom nav) */}
+        <nav className="hidden md:block flex-1 p-3 space-y-1 overflow-y-auto">
+          {navItems.map((item) => (
+            <NavItem
+              key={item.id}
+              id={item.id}
+              label={item.label}
+              icon={item.icon}
+              count={item.count}
+              isActive={activePanel === item.id}
+              disabled={!isConnected && item.id !== 'chat'}
+              collapsed={sidebarCollapsed}
+              onClick={() => setActivePanel(item.id)}
+            />
+          ))}
+        </nav>
+
+        {/* Server Info in Mobile Drawer */}
+        {isConnected && activeServer && (
+          <div className="md:hidden flex-1 p-3 overflow-y-auto border-t border-[var(--border)]">
+            <ServerInfo
+              serverInfo={activeServer.serverInfo}
+              capabilities={activeServer.capabilities}
+              toolsCount={currentTools.length}
+              resourcesCount={currentResources.length}
+              promptsCount={currentPrompts.length}
+            />
+            <button
+              onClick={() => {
+                handleDisconnect();
+                setMobileMenuOpen(false);
+              }}
+              className="w-full mt-4 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-medium"
+            >
+              Disconnect
+            </button>
+          </div>
+        )}
+
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        {/* Desktop Header */}
+        <header className="hidden md:flex h-11 items-center justify-between px-5 border-b border-[var(--border)] bg-[var(--background)]">
+          <div className="flex items-center gap-3">
+            <h2 className="font-medium text-sm capitalize">{activePanel}</h2>
+            {activePanel !== 'chat' && isConnected && activeServer && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--background-tertiary)] text-[10px] text-[var(--foreground-subtle)] font-mono">
+                <Server className="w-2.5 h-2.5" />
+                {activeServer.serverInfo?.name || activeServer.name}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <a
+              href="https://github.com/hemanth/mcp-web-client"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 rounded-md text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] transition-colors"
+              title="View on GitHub"
+            >
+              <Github className="w-4 h-4" />
+            </a>
+            {session ? (
+              <UserMenu />
+            ) : authStatus !== 'loading' && (
+              <a
+                href="/login"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-[var(--foreground)] text-[var(--background)] text-xs font-medium transition-colors hover:opacity-90"
+              >
+                <LogIn className="w-3 h-3" />
+                Sign in
+              </a>
+            )}
+          </div>
+        </header>
+
+        {/* Content Area */}
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* Main Panel */}
+          <div className={`flex-1 p-4 md:p-6 overflow-y-auto contain-layout`}>
+            <div className="h-full">
+              <Suspense fallback={<PanelLoader />}>
+                {activePanel === 'chat' && (
+                  <ChatPanel
+                    tools={allTools}
+                    onCallTool={handleCallToolOnServer}
+                    disabled={connectedServersCount === 0}
+                    connectedServers={servers
+                      .filter(s => s.status === 'connected')
+                      .map(s => ({ id: s.id, name: s.serverInfo?.name || s.name }))}
+                  />
+                )}
+
+                {activePanel === 'tools' && isConnected && (
+                  <ToolsPanel
+                    tools={currentTools}
+                    onCallTool={callTool}
+                    disabled={!isConnected}
+                  />
+                )}
+
+                {activePanel === 'resources' && isConnected && (
+                  <ResourcesPanel
+                    resources={currentResources}
+                    onReadResource={readResource}
+                    disabled={!isConnected}
+                  />
+                )}
+
+                {activePanel === 'prompts' && isConnected && (
+                  <PromptsPanel
+                    prompts={currentPrompts}
+                    onGetPrompt={getPrompt}
+                    disabled={!isConnected}
+                  />
+                )}
+
+                {/* Show prompt when non-chat panels selected without connection */}
+                {activePanel !== 'chat' && !isConnected && (
+                  <div className="flex flex-col items-center justify-center h-full text-center">
+                    <div className="w-16 h-16 md:w-20 md:h-20 mx-auto rounded-2xl bg-[var(--background-secondary)] flex items-center justify-center mb-4 md:mb-6">
+                      <Server className="w-8 h-8 md:w-10 md:h-10 text-[var(--foreground-muted)]" />
+                    </div>
+                    <h3 className="text-lg md:text-xl font-semibold mb-2 md:mb-3">Connect a Server</h3>
+                    <p className="text-sm md:text-base text-[var(--foreground-muted)]">
+                      Connect to an MCP server to use {activePanel}.
+                    </p>
+                  </div>
+                )}
+              </Suspense>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Mobile Bottom Navigation */}
+        <nav className="md:hidden flex-shrink-0 border-t border-[var(--border)] bg-[var(--background)]">
+          <div className="flex">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activePanel === item.id;
+              const disabled = !isConnected && item.id !== 'chat';
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActivePanel(item.id)}
+                  disabled={disabled}
+                  className={`relative flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium ${isActive
+                    ? 'text-[var(--accent)]'
+                    : 'text-[var(--foreground-subtle)]'
+                    } ${disabled ? 'opacity-40' : ''}`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                  {item.count !== null && item.count > 0 && (
+                    <span className={`absolute top-1 right-1/4 text-[8px] font-mono ${isActive ? 'text-[var(--accent)]' : 'text-[var(--foreground-subtle)]'}`}>
+                      {item.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      </div>
+
+      {/* Error state overlay */}
+      {activeServer?.status === 'error' && activeServer.error && (
+        <div className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:max-w-md p-4 bg-red-500/10 border border-red-500/20 rounded-xl backdrop-blur-lg z-40">
+          <h3 className="font-medium text-red-400 mb-1">Connection Error</h3>
+          <p className="text-sm text-red-300/80">{activeServer.error}</p>
+        </div>
+      )}
+
+      {/* Direct Add Server Modal (for mobile empty state) */}
+      {showAddServerModal && (
+        <AddServerModal
+          onAdd={handleDirectAddServer}
+          onAddServer={(url, name, transport, customHeaders) => handleAddServer(url, name, undefined, transport, customHeaders)}
+          onStartOAuth={handleStartOAuth}
+          onRegisterClient={handleRegisterClient}
+          onClose={() => setShowAddServerModal(false)}
+          isLoading={isAddingServer}
+        />
+      )}
+
+      {/* Sampling Request Modal */}
+      {samplingFlow.pendingRequest && (
+        <SamplingModal
+          request={samplingFlow.pendingRequest}
+          onApprove={samplingFlow.handleApprove}
+          onDeny={samplingFlow.handleDeny}
+          isProcessing={samplingFlow.isProcessing}
+          result={samplingFlow.result}
+        />
+      )}
+
+      {/* Elicitation Request Modal */}
+      {elicitationFlow.pendingRequest && (
+        <ElicitationModal
+          request={elicitationFlow.pendingRequest}
+          onSubmit={elicitationFlow.handleSubmit}
+          onDecline={elicitationFlow.handleDecline}
+          onCancel={elicitationFlow.handleCancel}
+        />
+      )}
+    </div>
+  );
+}

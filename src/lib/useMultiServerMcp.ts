@@ -9,6 +9,7 @@ import type {
   MCPMessage,
   MCPTool,
   MCPResource,
+  MCPResourceTemplate,
   MCPPrompt,
   MCPServerInfo,
   MCPCapabilities,
@@ -22,6 +23,9 @@ import type {
   ElicitationRequest,
   ElicitRequestParams,
   ElicitResult,
+  MCPProgressNotification,
+  MCPLogMessage,
+  MCPCompletionResult,
 } from './types';
 
 // Helper to normalize resource - some servers swap name/uri
@@ -42,7 +46,7 @@ function normalizeResource(resource: MCPResource): MCPResource {
   return resource;
 }
 
-const MCP_PROTOCOL_VERSION = '2024-11-05';
+const MCP_PROTOCOL_VERSION = '2025-06-18';
 const STORAGE_KEY = 'mcp-servers';
 
 // Detect transport type based on URL pattern
@@ -61,6 +65,7 @@ interface UseMultiServerMcpOptions {
   onError?: (serverId: string, error: Error) => void;
   onSamplingRequest?: (request: SamplingRequest) => void;
   onElicitationRequest?: (request: ElicitationRequest) => void;
+  onProgress?: (serverId: string, progress: MCPProgressNotification) => void;
 }
 
 interface ServerConnection {
@@ -99,9 +104,12 @@ function loadStoredServers(): (ServerInstance & { wasConnected?: boolean })[] {
       status: 'disconnected' as ConnectionStatus,
       tools: [],
       resources: [],
+      resourceTemplates: [],
       prompts: [],
       wasConnected: s.wasConnected,
       customHeaders: s.customHeaders,
+      logMessages: [],
+      activeProgress: new Map(),
     }));
   } catch {
     return [];
@@ -220,6 +228,55 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     });
   }, []);
 
+  // Send a JSON-RPC response back to the server (for server-initiated requests like ping, roots/list)
+  const sendServerResponse = useCallback((serverId: string, requestId: string | number, result: unknown) => {
+    const connection = connectionsRef.current.get(serverId);
+    if (!connection) {
+      console.error('Cannot send response: server not found');
+      return;
+    }
+
+    const response: MCPResponse = {
+      jsonrpc: '2.0',
+      id: requestId,
+      result,
+    };
+
+    const targetUrl = connection.messageEndpoint || connection.serverUrl;
+    const apiEndpoint = connection.transport === 'streamable-http'
+      ? '/api/mcp/streamable'
+      : '/api/mcp/message';
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-mcp-server-url': targetUrl,
+    };
+
+    if (connection.credentials) {
+      const tokenType = (connection.credentials.tokenType || 'Bearer').replace(/^bearer$/i, 'Bearer');
+      headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
+    }
+
+    if (connection.sessionId) {
+      headers['x-mcp-session-id'] = connection.sessionId;
+    }
+
+    if (connection.customHeaders && Object.keys(connection.customHeaders).length > 0) {
+      headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
+    }
+
+    console.log(`[${serverId}] Sending response for server request:`, requestId);
+
+    fetch(apiEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(response),
+    }).catch(error => {
+      console.error('Failed to send response:', error);
+    });
+  }, []);
+
+
   // Send a JSON-RPC request to a specific server
   const sendRequest = useCallback(async (serverId: string, method: string, params?: Record<string, unknown>): Promise<unknown> => {
     const connection = connectionsRef.current.get(serverId);
@@ -298,12 +355,18 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
                       try {
                         const parsed = JSON.parse(data) as MCPMessage;
 
-                        // Check if this is a request FROM the server (sampling/elicitation)
+                        // Check if this is a request FROM the server (sampling/elicitation/ping/roots)
                         if ('method' in parsed && 'id' in parsed) {
                           const server = servers.find(s => s.id === serverId);
                           const serverName = server?.name || 'Unknown Server';
 
-                          if (parsed.method === 'sampling/createMessage') {
+                          if (parsed.method === 'ping') {
+                            // Respond to server ping
+                            sendServerResponse(serverId, parsed.id as string | number, {});
+                          } else if (parsed.method === 'roots/list') {
+                            // Respond with empty roots (browser-based client)
+                            sendServerResponse(serverId, parsed.id as string | number, { roots: [] });
+                          } else if (parsed.method === 'sampling/createMessage') {
                             const samplingRequest: SamplingRequest = {
                               id: parsed.id,
                               serverId,
@@ -322,6 +385,12 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
                             };
                             options.onElicitationRequest?.(elicitationRequest);
                           }
+                          continue;
+                        }
+
+                        // Check if this is a notification (no id, has method)
+                        if ('method' in parsed && !('id' in parsed)) {
+                          handleNotification(serverId, (parsed as { method: string; params?: Record<string, unknown> }).method, (parsed as { params?: Record<string, unknown> }).params);
                           continue;
                         }
 
@@ -420,20 +489,124 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     });
   }, [servers, options]);
 
+  // Fetch all items from a paginated list endpoint
+  const fetchAllWithPagination = useCallback(async (serverId: string, method: string, itemsKey: string): Promise<unknown[]> => {
+    let allItems: unknown[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const params: Record<string, unknown> = {};
+      if (cursor) {
+        params.cursor = cursor;
+      }
+
+      const result = await sendRequest(serverId, method, Object.keys(params).length > 0 ? params : undefined) as Record<string, unknown>;
+      const items = (result[itemsKey] as unknown[]) || [];
+      allItems = allItems.concat(items);
+      cursor = result.nextCursor as string | undefined;
+    } while (cursor);
+
+    return allItems;
+  }, [sendRequest]);
+
+  // Handle notifications from the server (list-changed, progress, logging, cancellation, resource updates)
+  const handleNotification = useCallback((serverId: string, method: string, params?: Record<string, unknown>) => {
+    const connection = connectionsRef.current.get(serverId);
+
+    if (method === 'notifications/tools/list_changed') {
+      // Re-fetch tools list
+      sendRequest(serverId, 'tools/list').then(result => {
+        const tools = (result as { tools: MCPTool[] }).tools || [];
+        updateServer(serverId, { tools });
+      }).catch(err => console.error(`[${serverId}] Failed to re-fetch tools:`, err));
+    } else if (method === 'notifications/resources/list_changed') {
+      // Re-fetch resources list
+      sendRequest(serverId, 'resources/list').then(result => {
+        const rawResources = (result as { resources: MCPResource[] }).resources || [];
+        const resources = rawResources.map(normalizeResource);
+        updateServer(serverId, { resources });
+      }).catch(err => console.error(`[${serverId}] Failed to re-fetch resources:`, err));
+    } else if (method === 'notifications/prompts/list_changed') {
+      // Re-fetch prompts list
+      sendRequest(serverId, 'prompts/list').then(result => {
+        const prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
+        updateServer(serverId, { prompts });
+      }).catch(err => console.error(`[${serverId}] Failed to re-fetch prompts:`, err));
+    } else if (method === 'notifications/resources/updated') {
+      // A subscribed resource was updated — re-read it and notify
+      const uri = params?.uri as string | undefined;
+      if (uri) {
+        sendRequest(serverId, 'resources/read', { uri }).then(result => {
+          options.onNotification?.(serverId, method, { uri, ...result as Record<string, unknown> });
+        }).catch(err => console.error(`[${serverId}] Failed to re-read updated resource:`, err));
+      }
+    } else if (method === 'notifications/progress') {
+      // Progress notification
+      const progress: MCPProgressNotification = {
+        progressToken: (params?.progressToken as string | number) ?? '',
+        progress: (params?.progress as number) ?? 0,
+        total: params?.total as number | undefined,
+        message: params?.message as string | undefined,
+      };
+      // Update active progress on the server
+      setServers(prev => prev.map(s => {
+        if (s.id !== serverId) return s;
+        const updated = new Map(s.activeProgress);
+        updated.set(progress.progressToken, progress);
+        return { ...s, activeProgress: updated };
+      }));
+      options.onProgress?.(serverId, progress);
+    } else if (method === 'notifications/message') {
+      // Log message from server
+      const logMessage: MCPLogMessage = {
+        level: (params?.level as MCPLogMessage['level']) ?? 'info',
+        logger: params?.logger as string | undefined,
+        data: params?.data,
+        timestamp: Date.now(),
+      };
+      setServers(prev => prev.map(s => {
+        if (s.id !== serverId) return s;
+        return { ...s, logMessages: [...s.logMessages, logMessage] };
+      }));
+      options.onNotification?.(serverId, method, params);
+    } else if (method === 'notifications/cancelled') {
+      // Server cancelled one of our pending requests
+      const requestId = params?.requestId as string | undefined;
+      if (requestId && connection) {
+        const pending = connection.pendingRequests.get(requestId);
+        if (pending) {
+          clearTimeout(pending.timeout);
+          connection.pendingRequests.delete(requestId);
+          pending.reject(new Error(`Request cancelled by server: ${params?.reason || 'no reason'}`));
+        }
+      }
+    } else {
+      // Pass through any other notifications
+      options.onNotification?.(serverId, method, params);
+    }
+  }, [sendRequest, updateServer, options]);
+
   // Handle incoming SSE messages for a server
   const createMessageHandler = useCallback((serverId: string) => {
+
     return (eventData: string) => {
       try {
         const data = JSON.parse(eventData) as MCPMessage;
         const connection = connectionsRef.current.get(serverId);
 
         if ('id' in data && data.id !== undefined) {
-          // Check if this is a request FROM the server (sampling/elicitation)
+          // Check if this is a request FROM the server (sampling/elicitation/ping/roots)
           if ('method' in data) {
             const server = servers.find(s => s.id === serverId);
             const serverName = server?.name || 'Unknown Server';
 
-            if (data.method === 'sampling/createMessage') {
+            if (data.method === 'ping') {
+              // Respond to server ping
+              sendServerResponse(serverId, data.id, {});
+            } else if (data.method === 'roots/list') {
+              // Respond with empty roots (browser-based client)
+              sendServerResponse(serverId, data.id, { roots: [] });
+            } else if (data.method === 'sampling/createMessage') {
               // Server is requesting LLM sampling
               const samplingRequest: SamplingRequest = {
                 id: data.id,
@@ -465,13 +638,14 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
             pending.resolve(data as MCPResponse);
           }
         } else if ('method' in data) {
-          options.onNotification?.(serverId, data.method, data.params);
+          // Handle list-changed notifications by re-fetching
+          handleNotification(serverId, data.method, data.params as Record<string, unknown> | undefined);
         }
       } catch (error) {
         console.error('Failed to parse SSE message:', error);
       }
     };
-  }, [options, servers]);
+  }, [options, servers, sendServerResponse, handleNotification]);
 
   // Handle endpoint event for a server
   const createEndpointHandler = useCallback((serverId: string) => {
@@ -533,10 +707,13 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       status: 'disconnected',
       tools: [],
       resources: [],
+      resourceTemplates: [],
       prompts: [],
       credentials,
       transport,
       customHeaders,
+      logMessages: [],
+      activeProgress: new Map(),
     };
 
     setServers(prev => {
@@ -729,6 +906,12 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
           elicitation: {
             form: {},
           },
+          // Roots: Advertise roots support (browser client returns empty list)
+          roots: {
+            listChanged: true,
+          },
+          // Logging: Accept log messages from servers
+          logging: {},
           // SEP-1865: Advertise MCP Apps UI extension support
           extensions: {
             'io.modelcontextprotocol/ui': {
@@ -753,22 +936,28 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
 
       if (capabilities.tools) {
         promises.push(
-          sendRequest(serverId, 'tools/list')
-            .then(result => ({ type: 'tools', result }))
+          fetchAllWithPagination(serverId, 'tools/list', 'tools')
+            .then(result => ({ type: 'tools', result: { tools: result } }))
             .catch(() => ({ type: 'tools', result: { tools: [] } }))
         );
       }
       if (capabilities.resources) {
         promises.push(
-          sendRequest(serverId, 'resources/list')
-            .then(result => ({ type: 'resources', result }))
+          fetchAllWithPagination(serverId, 'resources/list', 'resources')
+            .then(result => ({ type: 'resources', result: { resources: result } }))
             .catch(() => ({ type: 'resources', result: { resources: [] } }))
+        );
+        // Also fetch resource templates
+        promises.push(
+          fetchAllWithPagination(serverId, 'resources/templates/list', 'resourceTemplates')
+            .then(result => ({ type: 'resourceTemplates', result: { resourceTemplates: result } }))
+            .catch(() => ({ type: 'resourceTemplates', result: { resourceTemplates: [] } }))
         );
       }
       if (capabilities.prompts) {
         promises.push(
-          sendRequest(serverId, 'prompts/list')
-            .then(result => ({ type: 'prompts', result }))
+          fetchAllWithPagination(serverId, 'prompts/list', 'prompts')
+            .then(result => ({ type: 'prompts', result: { prompts: result } }))
             .catch(() => ({ type: 'prompts', result: { prompts: [] } }))
         );
       }
@@ -777,6 +966,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
 
       let tools: MCPTool[] = [];
       let resources: MCPResource[] = [];
+      let resourceTemplates: MCPResourceTemplate[] = [];
       let prompts: MCPPrompt[] = [];
 
       for (const { type, result } of results) {
@@ -785,6 +975,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         } else if (type === 'resources') {
           const rawResources = (result as { resources: MCPResource[] }).resources || [];
           resources = rawResources.map(normalizeResource);
+        } else if (type === 'resourceTemplates') {
+          resourceTemplates = (result as { resourceTemplates: MCPResourceTemplate[] }).resourceTemplates || [];
         } else if (type === 'prompts') {
           prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
         }
@@ -796,6 +988,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         capabilities: initResult.capabilities,
         tools,
         resources,
+        resourceTemplates,
         prompts,
         error: undefined,
       });
@@ -846,10 +1039,13 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       status: 'disconnected',
       tools: [],
       resources: [],
+      resourceTemplates: [],
       prompts: [],
       serverInfo: undefined,
       capabilities: undefined,
       error: undefined,
+      logMessages: [],
+      activeProgress: new Map(),
     });
 
     // Select another server if this was active
@@ -1052,6 +1248,58 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     });
   }, []);
 
+  // Ping a server and wait for response
+  const pingServer = useCallback(async (serverId: string): Promise<void> => {
+    await sendRequest(serverId, 'ping', {});
+  }, [sendRequest]);
+
+  // Cancel an in-flight request
+  const cancelRequest = useCallback((serverId: string, requestId: string, reason?: string) => {
+    sendNotification(serverId, 'notifications/cancelled', {
+      requestId,
+      reason: reason || 'Cancelled by client',
+    });
+
+    // Also reject the local pending request if it exists
+    const connection = connectionsRef.current.get(serverId);
+    if (connection) {
+      const pending = connection.pendingRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        connection.pendingRequests.delete(requestId);
+        pending.reject(new Error('Request cancelled by client'));
+      }
+    }
+  }, [sendNotification]);
+
+  // Subscribe to resource updates
+  const subscribeResource = useCallback(async (serverId: string, uri: string): Promise<void> => {
+    await sendRequest(serverId, 'resources/subscribe', { uri });
+  }, [sendRequest]);
+
+  // Unsubscribe from resource updates
+  const unsubscribeResource = useCallback(async (serverId: string, uri: string): Promise<void> => {
+    await sendRequest(serverId, 'resources/unsubscribe', { uri });
+  }, [sendRequest]);
+
+  // Get completion/autocomplete suggestions
+  const getCompletion = useCallback(async (
+    serverId: string,
+    ref: { type: 'ref/prompt'; name: string } | { type: 'ref/resource'; uri: string },
+    argument: { name: string; value: string }
+  ): Promise<MCPCompletionResult> => {
+    const result = await sendRequest(serverId, 'completion/complete', {
+      ref,
+      argument,
+    }) as { completion: MCPCompletionResult };
+    return result.completion;
+  }, [sendRequest]);
+
+  // Set the minimum log level on a server
+  const setLogLevel = useCallback(async (serverId: string, level: MCPLogMessage['level']): Promise<void> => {
+    await sendRequest(serverId, 'logging/setLevel', { level });
+  }, [sendRequest]);
+
   // Auto-connect servers that were previously connected on page load
   useEffect(() => {
     if (!isInitialized) return;
@@ -1113,5 +1361,11 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     getAllPrompts,
     respondToSamplingRequest,
     respondToElicitationRequest,
+    pingServer,
+    cancelRequest,
+    subscribeResource,
+    unsubscribeResource,
+    getCompletion,
+    setLogLevel,
   };
 }
