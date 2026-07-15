@@ -111,33 +111,6 @@ export default function LandingPage() {
           <div className="hero-grid" aria-hidden="true" />
 
           <div className="relative max-w-3xl mx-auto">
-            {/* Top row — logo + links, inline, no bar */}
-            <div className="flex items-center justify-between mb-16 sm:mb-20">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded bg-[var(--accent)] flex items-center justify-center">
-                  <Zap className="w-3 h-3 text-[var(--background)]" />
-                </div>
-                <span className="font-semibold text-sm tracking-tight">MCPHost</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <a
-                  href="https://github.com/hemanth/mcp-web-client"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] transition-colors"
-                  aria-label="View on GitHub"
-                >
-                  <Github className="w-4 h-4" />
-                </a>
-                <Link
-                  href="/dashboard"
-                  className="hidden sm:flex items-center gap-1.5 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground)] transition-colors"
-                >
-                  Launch App
-                  <ArrowRight className="w-3 h-3" />
-                </Link>
-              </div>
-            </div>
 
             {/* Badge */}
             <div className="flex items-center gap-2 mb-8 sm:mb-10">
