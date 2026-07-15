@@ -462,15 +462,41 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-          <button
-            onClick={toggleSidebar}
-            className="p-1 rounded-md text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)] transition-colors"
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <div className={`transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}>
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </div>
-          </button>
+          <div className="flex items-center gap-1">
+            {!sidebarCollapsed && (
+              <>
+                <a
+                  href="https://github.com/hemanth/mcp-web-client"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1 rounded-md text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] transition-colors"
+                  title="View on GitHub"
+                >
+                  <Github className="w-3.5 h-3.5" />
+                </a>
+                {session ? (
+                  <UserMenu />
+                ) : authStatus !== 'loading' && (
+                  <a
+                    href="/login"
+                    className="p-1 rounded-md text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] transition-colors"
+                    title="Sign in"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </>
+            )}
+            <button
+              onClick={toggleSidebar}
+              className="p-1 rounded-md text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] hover:bg-[var(--background-tertiary)] transition-colors"
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <div className={`transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}>
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </div>
+            </button>
+          </div>
         </div>
 
         {/* Mobile Drawer Header */}
@@ -548,45 +574,9 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        {/* Desktop Header */}
-        <header className="hidden md:flex h-11 items-center justify-between px-5 border-b border-[var(--border)] bg-[var(--background)]">
-          <div className="flex items-center gap-3">
-            <h2 className="font-medium text-sm capitalize">{activePanel}</h2>
-            {activePanel !== 'chat' && isConnected && activeServer && (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--background-tertiary)] text-[10px] text-[var(--foreground-subtle)] font-mono">
-                <Server className="w-2.5 h-2.5" />
-                {activeServer.serverInfo?.name || activeServer.name}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <a
-              href="https://github.com/hemanth/mcp-web-client"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 rounded-md text-[var(--foreground-subtle)] hover:text-[var(--foreground-muted)] transition-colors"
-              title="View on GitHub"
-            >
-              <Github className="w-4 h-4" />
-            </a>
-            {session ? (
-              <UserMenu />
-            ) : authStatus !== 'loading' && (
-              <a
-                href="/login"
-                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-[var(--foreground)] text-[var(--background)] text-xs font-medium transition-colors hover:opacity-90"
-              >
-                <LogIn className="w-3 h-3" />
-                Sign in
-              </a>
-            )}
-          </div>
-        </header>
-
-        {/* Content Area */}
+        {/* Content Area — no header, full height */}
         <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* Main Panel */}
-          <div className={`flex-1 p-4 md:p-6 overflow-y-auto contain-layout`}>
+          <div className={`flex-1 ${activePanel === 'chat' ? '' : 'p-4 md:p-6 overflow-y-auto'} min-h-0`}>
             <div className="h-full">
               <Suspense fallback={<PanelLoader />}>
                 {activePanel === 'chat' && (

@@ -124,7 +124,7 @@ export const ChatPanel = memo(function ChatPanel({ tools, onCallTool, disabled, 
     : null;
 
   return (
-    <div className="flex flex-col h-full bg-[var(--background-secondary)] rounded-xl border border-[var(--border)]">
+    <div className="flex flex-col h-full bg-[var(--background)]">
       {/* Chat header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-2 flex-wrap">
