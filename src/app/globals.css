@@ -255,7 +255,7 @@ select,
 .landing-hero {
   padding: var(--space-xl) var(--space-lg) var(--space-2xl);
   max-width: 48rem;
-  margin-left: max(var(--space-lg), 8vw);
+  margin: 0 auto;
 }
 
 @media (min-width: 640px) {
@@ -383,18 +383,16 @@ select,
 .landing-section {
   padding: var(--space-2xl) var(--space-lg);
   max-width: 64rem;
-  margin-left: max(var(--space-lg), 8vw);
+  margin: 0 auto;
 }
 
 @media (max-width: 639px) {
   .landing-section {
-    margin-left: 0;
     padding-left: var(--space-md);
     padding-right: var(--space-md);
   }
 
   .landing-hero {
-    margin-left: 0;
     padding-left: var(--space-md);
     padding-right: var(--space-md);
   }
@@ -611,10 +609,9 @@ select,
    ======================================== */
 
 .landing-cta-section {
-  margin: var(--space-xl) var(--space-lg) var(--space-2xl);
-  margin-left: max(var(--space-lg), 8vw);
+  margin: var(--space-xl) auto var(--space-2xl);
   max-width: 40rem;
-  padding: var(--space-xl);
+  padding: var(--space-xl) var(--space-lg);
   background: var(--color-paper-2);
   border: 1px solid var(--color-rule);
   border-radius: 0.75rem;
