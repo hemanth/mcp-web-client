@@ -39,12 +39,21 @@ export const metadata: Metadata = {
     siteName: "MCPHost",
     type: "website",
     locale: "en_US",
+    images: [
+      {
+        url: "https://mcphost.link/og-image.jpg",
+        width: 1200,
+        height: 630,
+        alt: "MCPHost — The Universal MCP Client",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "MCPHost — The Universal MCP Client",
     description:
       "Connect to any MCP server from your browser. Multi-server, OAuth 2.0, real-time SSE, LLM chat, and 50+ integrations.",
+    images: ["https://mcphost.link/og-image.jpg"],
   },
   keywords: [
     "MCP",
