@@ -30,7 +30,7 @@ const features = [
   {
     icon: Wrench,
     title: 'Full Protocol',
-    description: 'Tools, resources, prompts, sampling, elicitation, progress, logging — the complete spec.',
+    description: 'Tools, resources, prompts, sampling, elicitation, progress, logging. The complete spec.',
   },
   {
     icon: MessageSquare,
@@ -86,13 +86,7 @@ export default function LandingPage() {
     <div style={{ background: 'var(--color-paper)', color: 'var(--color-ink)', minHeight: '100vh', overflowX: 'hidden' }}>
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:p-4" style={{ background: 'var(--color-accent)', color: 'var(--color-paper)' }}>Skip to content</a>
 
-      {/* Nav — N9 Edge-aligned minimal */}
-      <nav className="landing-nav" aria-label="Main">
-        <span className="landing-nav-wordmark">MCPHost</span>
-        <Link href="/dashboard" className="landing-nav-cta">
-          Launch App <ArrowRight style={{ width: '0.875rem', height: '0.875rem' }} />
-        </Link>
-      </nav>
+
 
       <main id="main-content">
         {/* Hero — left-biased, functional, not showy */}
@@ -111,7 +105,7 @@ export default function LandingPage() {
           {/* Subtitle */}
           <p className="landing-subtitle">
             Connect to any MCP server from your browser. Browse tools, read resources,
-            use prompts, and chat with LLMs — all in one place.
+            use prompts, and chat with LLMs. All in one place.
           </p>
 
           {/* CTAs */}
