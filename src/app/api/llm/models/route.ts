@@ -28,8 +28,9 @@ async function fetchOpenAIModels(apiKey: string): Promise<ModelInfo[]> {
 }
 
 async function fetchNvidiaModels(apiKey: string, baseUrl?: string): Promise<ModelInfo[]> {
-  const url = baseUrl || 'https://integrate.api.nvidia.com/v1';
-  const res = await fetch(`${url}/models`, {
+  // Strip trailing slash; treat empty string same as missing
+  const base = (baseUrl || '').replace(/\/$/, '') || 'https://integrate.api.nvidia.com/v1';
+  const res = await fetch(`${base}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!res.ok) throw new Error(`NVIDIA: ${res.status}`);
@@ -41,6 +42,7 @@ async function fetchNvidiaModels(apiKey: string, baseUrl?: string): Promise<Mode
     }))
     .sort((a: ModelInfo, b: ModelInfo) => a.id.localeCompare(b.id));
 }
+
 
 async function fetchGeminiModels(apiKey: string): Promise<ModelInfo[]> {
   const res = await fetch(

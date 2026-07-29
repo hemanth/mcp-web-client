@@ -547,8 +547,11 @@ async function callOllama(request: ChatRequest): Promise<Response> {
 
 // OpenAI-compatible endpoint handler (used for NVIDIA NIM and Custom endpoints)
 async function callOpenAICompatible(request: ChatRequest): Promise<Response> {
-  const baseUrl = request.baseUrl;
-  if (!baseUrl) {
+  // For NVIDIA, fall back to the default base URL if none provided
+  const resolvedBaseUrl = (request.baseUrl || '').replace(/\/$/, '') ||
+    (request.provider === 'nvidia' ? 'https://integrate.api.nvidia.com/v1' : '');
+
+  if (!resolvedBaseUrl) {
     throw new Error('Base URL is required for this provider');
   }
 
@@ -585,12 +588,13 @@ async function callOpenAICompatible(request: ChatRequest): Promise<Response> {
   }
 
   // Normalize base URL: ensure it ends with /chat/completions
-  let url = baseUrl.replace(/\/$/, '');
+  let url = resolvedBaseUrl;
   if (!url.endsWith('/chat/completions')) {
     url = url.endsWith('/v1')
       ? `${url}/chat/completions`
       : `${url}/v1/chat/completions`;
   }
+
 
   const response = await fetch(url, {
     method: 'POST',
