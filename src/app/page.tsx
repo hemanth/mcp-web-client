@@ -126,7 +126,7 @@ export default function LandingPage() {
 
           {/* Tech pills */}
           <div className="tech-pills">
-            {['Next.js', 'TypeScript', 'MCP 2025-06-18', 'OAuth 2.0'].map((tech) => (
+            {['Next.js', 'TypeScript', 'MCP 2026-07-28', 'OAuth 2.0'].map((tech) => (
               <span key={tech} className="tech-pill">{tech}</span>
             ))}
           </div>

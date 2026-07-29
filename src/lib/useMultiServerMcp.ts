@@ -46,7 +46,11 @@ function normalizeResource(resource: MCPResource): MCPResource {
   return resource;
 }
 
-const MCP_PROTOCOL_VERSION = '2025-06-18';
+// Protocol versions — newest first so we try the latest with new servers
+const MCP_PROTOCOL_VERSION_NEW = '2026-07-28';
+const MCP_PROTOCOL_VERSION_OLD = '2025-06-18';
+// Default used in _meta and initialize for new servers
+const MCP_PROTOCOL_VERSION = MCP_PROTOCOL_VERSION_NEW;
 const STORAGE_KEY = 'mcp-servers';
 
 // Detect transport type based on URL pattern
@@ -73,8 +77,12 @@ interface ServerConnection {
   transport: TransportType;
   credentials: OAuthCredentials | null;
   customHeaders: Record<string, string> | null;
+  // sessionId removed — Mcp-Session-Id dropped in 2026-07-28 Streamable HTTP spec
+  // Kept for SSE legacy transport only
   sessionId: string | null;
   messageEndpoint: string | null;
+  // Negotiated protocol version: '2026-07-28' (new) or '2025-06-18' (old)
+  negotiatedVersion: string;
   pendingRequests: Map<string, {
     resolve: (value: MCPResponse) => void;
     reject: (error: Error) => void;
@@ -208,7 +216,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
     }
 
-    if (connection.sessionId) {
+    // Only send session ID for old protocol (2025-06-18). Removed in 2026-07-28.
+    if (connection.sessionId && connection.negotiatedVersion !== MCP_PROTOCOL_VERSION_NEW) {
       headers['x-mcp-session-id'] = connection.sessionId;
     }
 
@@ -277,6 +286,27 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
   }, []);
 
 
+  // Build _meta for 2026-07-28 stateless requests
+  const buildMeta = useCallback((connection: ServerConnection): Record<string, unknown> | undefined => {
+    if (connection.negotiatedVersion !== MCP_PROTOCOL_VERSION_NEW) {
+      // Old servers don't understand _meta protocol fields
+      return undefined;
+    }
+    return {
+      'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION_NEW,
+      'io.modelcontextprotocol/clientInfo': {
+        name: 'MCP Web Client',
+        version: '2026-07-28',
+      },
+    };
+  }, []);
+
+  // Inject _meta into request params for 2026-07-28 servers
+  const withMeta = useCallback((params: Record<string, unknown> | undefined, meta: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+    if (!meta) return params;
+    return { ...(params || {}), _meta: meta };
+  }, []);
+
   // Send a JSON-RPC request to a specific server
   const sendRequest = useCallback(async (serverId: string, method: string, params?: Record<string, unknown>): Promise<unknown> => {
     const connection = connectionsRef.current.get(serverId);
@@ -285,11 +315,16 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     }
 
     const id = uuidv4();
+
+    // For 2026-07-28 servers: inject _meta into every request
+    const meta = buildMeta(connection);
+    const finalParams = withMeta(params, meta);
+
     const request: MCPRequest = {
       jsonrpc: '2.0',
       id,
       method,
-      params,
+      params: finalParams,
     };
 
     // For Streamable HTTP, send request and wait for direct response
@@ -304,7 +339,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
       }
 
-      if (connection.sessionId) {
+      // Only send session ID for old protocol (2025-06-18). Removed in 2026-07-28.
+      if (connection.sessionId && connection.negotiatedVersion !== MCP_PROTOCOL_VERSION_NEW) {
         headers['x-mcp-session-id'] = connection.sessionId;
       }
 
@@ -313,7 +349,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         headers['x-mcp-custom-headers'] = JSON.stringify(connection.customHeaders);
       }
 
-      console.log(`[${serverId}] Sending Streamable HTTP request:`, method, 'sessionId:', connection.sessionId);
+      console.log(`[${serverId}] Sending Streamable HTTP request:`, method, 'protocol:', connection.negotiatedVersion);
 
       const response = await fetch('/api/mcp/streamable', {
         method: 'POST',
@@ -321,12 +357,11 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         body: JSON.stringify(request),
       });
 
-      // Capture session ID from response
+      // Capture session ID from response — only meaningful for old-protocol servers
       const responseSessionId = response.headers.get('mcp-session-id');
-      console.log(`[${serverId}] Response session ID:`, responseSessionId, 'current:', connection.sessionId);
-      if (responseSessionId) {
+      if (responseSessionId && connection.negotiatedVersion !== MCP_PROTOCOL_VERSION_NEW) {
         connection.sessionId = responseSessionId;
-        console.log(`[${serverId}] Session ID updated to:`, connection.sessionId);
+        console.log(`[${serverId}] Session ID (legacy):`, connection.sessionId);
       }
 
       const contentType = response.headers.get('content-type') || '';
@@ -398,8 +433,19 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
                         if ('id' in parsed && String(parsed.id) === id) {
                           const resp = parsed as MCPResponse;
                           if (resp.error) {
-                            reject(new Error(`${resp.error.message} (code: ${resp.error.code})`));
+                            // -32022 = UnsupportedProtocolVersion (2026-07-28 spec)
+                            if (resp.error.code === -32022 || resp.error.code === -32004) {
+                              reject(new Error(`Unsupported protocol version: server rejected ${MCP_PROTOCOL_VERSION_NEW}`));
+                            } else {
+                              reject(new Error(`${resp.error.message} (code: ${resp.error.code})`));
+                            }
                           } else {
+                            // 2026-07-28: check resultType — 'input_required' signals MRTR
+                            const result = resp.result as Record<string, unknown> | null | undefined;
+                            if (result && typeof result === 'object' && result.resultType === 'input_required') {
+                              console.warn(`[${serverId}] Server returned input_required (MRTR) for method:`, method);
+                              // Surface as structured result — caller handles MRTR if needed
+                            }
                             resolve(resp.result);
                           }
                           return;
@@ -429,7 +475,16 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
 
       const data = await response.json();
       if (data.error) {
+        // -32022 = UnsupportedProtocolVersion (2026-07-28 spec)
+        if (data.error.code === -32022 || data.error.code === -32004) {
+          throw new Error(`Unsupported protocol version: server rejected ${MCP_PROTOCOL_VERSION_NEW}`);
+        }
         throw new Error(`${data.error.message} (code: ${data.error.code})`);
+      }
+      // 2026-07-28: check resultType for MRTR
+      const result = data.result as Record<string, unknown> | null | undefined;
+      if (result && typeof result === 'object' && result.resultType === 'input_required') {
+        console.warn(`[${serverId}] Server returned input_required (MRTR) for method:`, method);
       }
       return data.result;
     }
@@ -780,6 +835,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       customHeaders: server.customHeaders || null,
       sessionId: null,
       messageEndpoint: null,
+      // Start assuming new protocol; downgrade to old if server/discover fails
+      negotiatedVersion: MCP_PROTOCOL_VERSION_NEW,
       pendingRequests: new Map(),
       abortController: new AbortController(),
     };
@@ -894,42 +951,88 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         updateServer(serverId, { status: 'authenticating' });
       }
 
-      const initResult = await sendRequest(serverId, 'initialize', {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {
-          tools: {},
-          resources: {},
-          prompts: {},
-          // Sampling: Allow servers to request LLM completions
-          sampling: {},
-          // Elicitation: Allow servers to request user input
-          elicitation: {
-            form: {},
-          },
-          // Roots: Advertise roots support (browser client returns empty list)
-          roots: {
-            listChanged: true,
-          },
-          // Logging: Accept log messages from servers
-          logging: {},
-          // SEP-1865: Advertise MCP Apps UI extension support
-          extensions: {
-            'io.modelcontextprotocol/ui': {
-              mimeTypes: ['text/html;profile=mcp-app'],
-            },
+      // ── Protocol negotiation ──────────────────────────────────────────────
+      // Try 2026-07-28: call server/discover (stateless, no initialize needed)
+      // Fall back to 2025-06-18: call initialize if server/discover isn't found
+      // ─────────────────────────────────────────────────────────────────────
+
+      const clientCapabilities = {
+        tools: {},
+        resources: {},
+        prompts: {},
+        sampling: {},
+        elicitation: { form: {} },
+        roots: { listChanged: true },
+        logging: {},
+        extensions: {
+          'io.modelcontextprotocol/ui': {
+            mimeTypes: ['text/html;profile=mcp-app'],
           },
         },
-        clientInfo: {
-          name: 'MCP Web Client',
-          version: '1.0.0',
-        },
-      }) as {
-        protocolVersion: string;
-        capabilities: MCPCapabilities;
-        serverInfo: MCPServerInfo;
       };
 
-      sendNotification(serverId, 'notifications/initialized', {});
+      let initResult: { protocolVersion: string; capabilities: MCPCapabilities; serverInfo: MCPServerInfo };
+      let usedNewProtocol = false;
+
+      try {
+        // Try new 2026-07-28 protocol: server/discover
+        // _meta is injected by sendRequest based on connection.negotiatedVersion (already set to new)
+        console.log(`[${serverId}] Trying server/discover (2026-07-28 protocol)`);
+        const discoverResult = await sendRequest(serverId, 'server/discover') as {
+          protocolVersions: string[];
+          capabilities: MCPCapabilities;
+          serverInfo: MCPServerInfo;
+        };
+
+        // Pick the newest mutually supported version
+        const supportedVersions = discoverResult.protocolVersions || [];
+        const negotiated = supportedVersions.includes(MCP_PROTOCOL_VERSION_NEW)
+          ? MCP_PROTOCOL_VERSION_NEW
+          : supportedVersions.includes(MCP_PROTOCOL_VERSION_OLD)
+          ? MCP_PROTOCOL_VERSION_OLD
+          : MCP_PROTOCOL_VERSION_NEW; // Assume new if list is empty/unknown
+
+        connection.negotiatedVersion = negotiated;
+        console.log(`[${serverId}] Negotiated version via server/discover:`, negotiated);
+
+        initResult = {
+          protocolVersion: negotiated,
+          capabilities: discoverResult.capabilities || {},
+          serverInfo: discoverResult.serverInfo || { name: 'Unknown', version: '0' },
+        };
+        usedNewProtocol = true;
+
+      } catch (discoverError) {
+        const errMsg = discoverError instanceof Error ? discoverError.message : '';
+        const isMethodNotFound = errMsg.includes('-32601') || errMsg.includes('Method not found') || errMsg.includes('not found');
+        const isUnsupportedVersion = errMsg.includes('Unsupported protocol version') || errMsg.includes('-32022') || errMsg.includes('-32004');
+
+        if (isMethodNotFound || isUnsupportedVersion) {
+          // Old server: fall back to 2025-06-18 initialize handshake
+          console.log(`[${serverId}] server/discover not supported, falling back to initialize (2025-06-18)`);
+          connection.negotiatedVersion = MCP_PROTOCOL_VERSION_OLD;
+
+          const result = await sendRequest(serverId, 'initialize', {
+            protocolVersion: MCP_PROTOCOL_VERSION_OLD,
+            capabilities: clientCapabilities,
+            clientInfo: {
+              name: 'MCP Web Client',
+              version: '2026-07-28',
+            },
+          }) as {
+            protocolVersion: string;
+            capabilities: MCPCapabilities;
+            serverInfo: MCPServerInfo;
+          };
+
+          // Send initialized notification (required by old protocol)
+          sendNotification(serverId, 'notifications/initialized', {});
+          initResult = result;
+        } else {
+          // Real connection error — rethrow
+          throw discoverError;
+        }
+      }
 
       const capabilities = initResult.capabilities || {};
       const promises: Promise<{ type: string; result: unknown }>[] = [];
@@ -981,6 +1084,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
           prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
         }
       }
+
+      console.log(`[${serverId}] Connected — protocol: ${initResult.protocolVersion}, new-protocol: ${usedNewProtocol}`);
 
       updateServer(serverId, {
         status: 'connected',
@@ -1181,7 +1286,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
     }
 
-    if (connection.sessionId) {
+    if (connection.sessionId && connection.negotiatedVersion !== MCP_PROTOCOL_VERSION_NEW) {
       headers['x-mcp-session-id'] = connection.sessionId;
     }
 
@@ -1231,7 +1336,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       headers['Authorization'] = `${tokenType} ${connection.credentials.accessToken}`;
     }
 
-    if (connection.sessionId) {
+    if (connection.sessionId && connection.negotiatedVersion !== MCP_PROTOCOL_VERSION_NEW) {
       headers['x-mcp-session-id'] = connection.sessionId;
     }
 
