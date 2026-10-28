@@ -26,6 +26,10 @@ import type {
   MCPProgressNotification,
   MCPLogMessage,
   MCPCompletionResult,
+  MCPEventType,
+  MCPEventOccurrence,
+  MCPEventPollResult,
+  EventSubscription,
 } from './types';
 
 // Helper to normalize resource - some servers swap name/uri
@@ -114,6 +118,7 @@ function loadStoredServers(): (ServerInstance & { wasConnected?: boolean })[] {
       resources: [],
       resourceTemplates: [],
       prompts: [],
+      eventTypes: [],
       wasConnected: s.wasConnected,
       customHeaders: s.customHeaders,
       logMessages: [],
@@ -587,6 +592,12 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         const prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
         updateServer(serverId, { prompts });
       }).catch(err => console.error(`[${serverId}] Failed to re-fetch prompts:`, err));
+    } else if (method === 'notifications/events/list_changed') {
+      // Re-fetch event types (SEP-3415 Events extension)
+      fetchAllWithPagination(serverId, 'events/list', 'events').then(result => {
+        const eventTypes = (result as MCPEventType[]) || [];
+        updateServer(serverId, { eventTypes });
+      }).catch(err => console.error(`[${serverId}] Failed to re-fetch event types:`, err));
     } else if (method === 'notifications/resources/updated') {
       // A subscribed resource was updated — re-read it and notify
       const uri = params?.uri as string | undefined;
@@ -764,6 +775,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       resources: [],
       resourceTemplates: [],
       prompts: [],
+      eventTypes: [],
       credentials,
       transport,
       customHeaders,
@@ -1065,12 +1077,24 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         );
       }
 
+      // SEP-3415: Events extension — check if server advertises io.modelcontextprotocol/events
+      const extensions = (capabilities as Record<string, unknown>).extensions as Record<string, unknown> | undefined;
+      const hasEvents = extensions?.['io.modelcontextprotocol/events'] != null;
+      if (hasEvents) {
+        promises.push(
+          fetchAllWithPagination(serverId, 'events/list', 'events')
+            .then(result => ({ type: 'events', result: { events: result } }))
+            .catch(() => ({ type: 'events', result: { events: [] } }))
+        );
+      }
+
       const results = await Promise.all(promises);
 
       let tools: MCPTool[] = [];
       let resources: MCPResource[] = [];
       let resourceTemplates: MCPResourceTemplate[] = [];
       let prompts: MCPPrompt[] = [];
+      let eventTypes: MCPEventType[] = [];
 
       for (const { type, result } of results) {
         if (type === 'tools') {
@@ -1082,6 +1106,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
           resourceTemplates = (result as { resourceTemplates: MCPResourceTemplate[] }).resourceTemplates || [];
         } else if (type === 'prompts') {
           prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
+        } else if (type === 'events') {
+          eventTypes = (result as { events: MCPEventType[] }).events || [];
         }
       }
 
@@ -1095,6 +1121,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         resources,
         resourceTemplates,
         prompts,
+        eventTypes,
         error: undefined,
       });
 
@@ -1146,6 +1173,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       resources: [],
       resourceTemplates: [],
       prompts: [],
+      eventTypes: [],
       serverInfo: undefined,
       capabilities: undefined,
       error: undefined,
@@ -1405,6 +1433,126 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     await sendRequest(serverId, 'logging/setLevel', { level });
   }, [sendRequest]);
 
+  // ── SEP-3415: Events Extension (poll-based delivery) ────────────────────
+
+  // Active poll subscriptions: key = `${serverId}:${eventName}:${JSON.stringify(args)}`
+  const eventSubscriptionsRef = useRef<Map<string, EventSubscription>>(new Map());
+  const pollTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const [eventSubscriptions, setEventSubscriptions] = useState<EventSubscription[]>([]);
+
+  const makeSubKey = useCallback((serverId: string, eventName: string, args: Record<string, unknown>) => {
+    return `${serverId}:${eventName}:${JSON.stringify(args)}`;
+  }, []);
+
+  // Poll a single subscription once
+  const pollOnce = useCallback(async (sub: EventSubscription): Promise<void> => {
+    try {
+      const result = await sendRequest(sub.serverId, 'events/poll', {
+        name: sub.eventName,
+        arguments: sub.arguments,
+        cursor: sub.cursor,
+        maxEvents: 50,
+      }) as MCPEventPollResult;
+
+      const key = makeSubKey(sub.serverId, sub.eventName, sub.arguments);
+      const existing = eventSubscriptionsRef.current.get(key);
+      if (!existing || !existing.active) return;
+
+      // Deduplicate events by eventId
+      const seenIds = new Set(existing.receivedEvents.map(e => e.eventId));
+      const newEvents = (result.events || []).filter(e => !seenIds.has(e.eventId));
+
+      const updated: EventSubscription = {
+        ...existing,
+        cursor: result.cursor,
+        nextPollMs: Math.max(result.nextPollMs || 30000, 1000), // Floor at 1s
+        receivedEvents: [...existing.receivedEvents, ...newEvents].slice(-200), // Cap at 200
+      };
+
+      eventSubscriptionsRef.current.set(key, updated);
+      setEventSubscriptions(Array.from(eventSubscriptionsRef.current.values()));
+
+      // If hasMore, poll again immediately; otherwise schedule next poll
+      if (result.hasMore) {
+        pollOnce(updated);
+      } else if (updated.active) {
+        const timer = setTimeout(() => pollOnce(updated), updated.nextPollMs);
+        pollTimersRef.current.set(key, timer);
+      }
+    } catch (err) {
+      console.error(`[events/poll] Error polling ${sub.eventName}:`, err);
+      // Retry after backoff
+      const key = makeSubKey(sub.serverId, sub.eventName, sub.arguments);
+      const existing = eventSubscriptionsRef.current.get(key);
+      if (existing?.active) {
+        const timer = setTimeout(() => pollOnce(existing), Math.min(existing.nextPollMs * 2, 60000));
+        pollTimersRef.current.set(key, timer);
+      }
+    }
+  }, [sendRequest, makeSubKey]);
+
+  // Start polling for an event type
+  const startEventPoll = useCallback((serverId: string, eventName: string, args: Record<string, unknown> = {}) => {
+    const key = makeSubKey(serverId, eventName, args);
+
+    // Stop existing poll if any
+    const existingTimer = pollTimersRef.current.get(key);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const sub: EventSubscription = {
+      serverId,
+      eventName,
+      arguments: args,
+      cursor: null,
+      nextPollMs: 30000,
+      active: true,
+      receivedEvents: eventSubscriptionsRef.current.get(key)?.receivedEvents || [],
+    };
+
+    eventSubscriptionsRef.current.set(key, sub);
+    setEventSubscriptions(Array.from(eventSubscriptionsRef.current.values()));
+
+    // First poll bootstraps the cursor (null cursor = start from now)
+    pollOnce(sub);
+  }, [makeSubKey, pollOnce]);
+
+  // Stop polling for an event type
+  const stopEventPoll = useCallback((serverId: string, eventName: string, args: Record<string, unknown> = {}) => {
+    const key = makeSubKey(serverId, eventName, args);
+    const timer = pollTimersRef.current.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      pollTimersRef.current.delete(key);
+    }
+
+    const existing = eventSubscriptionsRef.current.get(key);
+    if (existing) {
+      existing.active = false;
+      eventSubscriptionsRef.current.set(key, existing);
+      setEventSubscriptions(Array.from(eventSubscriptionsRef.current.values()));
+    }
+  }, [makeSubKey]);
+
+  // Clear received events for a subscription
+  const clearEventHistory = useCallback((serverId: string, eventName: string, args: Record<string, unknown> = {}) => {
+    const key = makeSubKey(serverId, eventName, args);
+    const existing = eventSubscriptionsRef.current.get(key);
+    if (existing) {
+      existing.receivedEvents = [];
+      eventSubscriptionsRef.current.set(key, existing);
+      setEventSubscriptions(Array.from(eventSubscriptionsRef.current.values()));
+    }
+  }, [makeSubKey]);
+
+  // Cleanup poll timers when server disconnects
+  useEffect(() => {
+    return () => {
+      for (const timer of pollTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
+
   // Auto-connect servers that were previously connected on page load
   useEffect(() => {
     if (!isInitialized) return;
@@ -1472,5 +1620,10 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     unsubscribeResource,
     getCompletion,
     setLogLevel,
+    // SEP-3415: Events
+    eventSubscriptions,
+    startEventPoll,
+    stopEventPoll,
+    clearEventHistory,
   };
 }

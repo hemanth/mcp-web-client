@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { Server, Wrench, FileText, BookOpen, X } from 'lucide-react';
+import { Server, Wrench, FileText, BookOpen, Bell, X } from 'lucide-react';
 import type { MCPServerInfo, MCPCapabilities } from '@/lib/types';
 
 interface ServerInfoProps {
@@ -10,6 +10,7 @@ interface ServerInfoProps {
   toolsCount: number;
   resourcesCount: number;
   promptsCount: number;
+  eventsCount?: number;
 }
 
 export const ServerInfo = memo(function ServerInfo({
@@ -18,6 +19,7 @@ export const ServerInfo = memo(function ServerInfo({
   toolsCount,
   resourcesCount,
   promptsCount,
+  eventsCount = 0,
 }: ServerInfoProps) {
   if (!serverInfo) {
     return null;
@@ -27,6 +29,7 @@ export const ServerInfo = memo(function ServerInfo({
     { name: 'Tools', enabled: capabilities?.tools !== undefined, icon: Wrench, count: toolsCount, color: 'text-[var(--accent)]', bg: 'bg-[var(--accent)]/10' },
     { name: 'Resources', enabled: capabilities?.resources !== undefined, icon: FileText, count: resourcesCount, color: 'text-blue-400', bg: 'bg-blue-500/10' },
     { name: 'Prompts', enabled: capabilities?.prompts !== undefined, icon: BookOpen, count: promptsCount, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+    ...(eventsCount > 0 ? [{ name: 'Events', enabled: true, icon: Bell, count: eventsCount, color: 'text-amber-400', bg: 'bg-amber-500/10' }] : []),
   ];
 
   return (

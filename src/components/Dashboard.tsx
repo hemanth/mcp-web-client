@@ -20,6 +20,7 @@ import {
   Wrench,
   FileText,
   BookOpen,
+  Bell,
   Zap,
   ChevronLeft,
   ChevronRight,
@@ -36,8 +37,9 @@ const ChatPanel = lazy(() => import('@/components/ChatPanel').then(m => ({ defau
 const ToolsPanel = lazy(() => import('@/components/ToolsPanel').then(m => ({ default: m.ToolsPanel })));
 const ResourcesPanel = lazy(() => import('@/components/ResourcesPanel').then(m => ({ default: m.ResourcesPanel })));
 const PromptsPanel = lazy(() => import('@/components/PromptsPanel').then(m => ({ default: m.PromptsPanel })));
+const EventsPanel = lazy(() => import('@/components/EventsPanel').then(m => ({ default: m.EventsPanel })));
 
-type ActivePanel = 'chat' | 'tools' | 'resources' | 'prompts';
+type ActivePanel = 'chat' | 'tools' | 'resources' | 'prompts' | 'events';
 
 // Loading fallback component
 const PanelLoader = memo(function PanelLoader() {
@@ -134,6 +136,11 @@ export default function Dashboard() {
     getAllTools,
     respondToSamplingRequest,
     respondToElicitationRequest,
+    // SEP-3415: Events
+    eventSubscriptions,
+    startEventPoll,
+    stopEventPoll,
+    clearEventHistory,
   } = useMultiServerMcp({
     onError: useCallback((serverId: string, error: Error) => {
       toast.error(error.message);
@@ -383,12 +390,16 @@ export default function Dashboard() {
 
   // Tools for the active server (for the Tools panel)
   const currentTools = activeServer?.tools || [];
+  const currentEventTypes = activeServer?.eventTypes || [];
 
   const navItems = [
     { id: 'chat' as const, label: 'Chat', icon: MessageSquare, count: null },
     { id: 'tools' as const, label: 'Tools', icon: Wrench, count: currentTools.length },
     { id: 'resources' as const, label: 'Resources', icon: FileText, count: currentResources.length },
     { id: 'prompts' as const, label: 'Prompts', icon: BookOpen, count: currentPrompts.length },
+    ...(currentEventTypes.length > 0
+      ? [{ id: 'events' as const, label: 'Events', icon: Bell, count: currentEventTypes.length }]
+      : []),
   ];
 
   return (
@@ -557,6 +568,7 @@ export default function Dashboard() {
               toolsCount={currentTools.length}
               resourcesCount={currentResources.length}
               promptsCount={currentPrompts.length}
+              eventsCount={currentEventTypes.length}
             />
             <button
               onClick={() => {
@@ -610,6 +622,18 @@ export default function Dashboard() {
                   <PromptsPanel
                     prompts={currentPrompts}
                     onGetPrompt={getPrompt}
+                    disabled={!isConnected}
+                  />
+                )}
+
+                {activePanel === 'events' && isConnected && activeServerId && (
+                  <EventsPanel
+                    eventTypes={currentEventTypes}
+                    subscriptions={eventSubscriptions}
+                    serverId={activeServerId}
+                    onStartPoll={startEventPoll}
+                    onStopPoll={stopEventPoll}
+                    onClearHistory={clearEventHistory}
                     disabled={!isConnected}
                   />
                 )}

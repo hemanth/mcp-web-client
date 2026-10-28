@@ -17,6 +17,7 @@ export interface MCPCapabilities {
   logging?: boolean;
   sampling?: boolean;
   elicitation?: boolean;
+  extensions?: Record<string, unknown>;
 }
 
 export interface MCPInitializeParams {
@@ -211,6 +212,51 @@ export interface MCPCompletionResult {
   hasMore?: boolean;
 }
 
+// Events Extension Types (io.modelcontextprotocol/events — SEP-3415)
+
+export type EventDeliveryMode = 'poll' | 'push' | 'webhook';
+
+export interface MCPEventType {
+  name: string;
+  description?: string;
+  delivery: EventDeliveryMode[];
+  inputSchema?: {
+    type: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  payloadSchema?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+}
+
+export interface MCPEventOccurrence {
+  eventId: string;
+  name: string;
+  timestamp: string;
+  data: Record<string, unknown>;
+  cursor?: string | null;
+  _meta?: Record<string, unknown>;
+}
+
+export interface MCPEventPollResult {
+  resultType: 'complete';
+  events: MCPEventOccurrence[];
+  cursor: string | null;
+  truncated: boolean;
+  hasMore: boolean;
+  nextPollMs: number;
+}
+
+export interface EventSubscription {
+  serverId: string;
+  eventName: string;
+  arguments: Record<string, unknown>;
+  cursor: string | null;
+  nextPollMs: number;
+  active: boolean;
+  receivedEvents: MCPEventOccurrence[];
+}
+
 export interface ServerInstance {
   id: string;
   url: string;
@@ -224,6 +270,7 @@ export interface ServerInstance {
   resources: MCPResource[];
   resourceTemplates: MCPResourceTemplate[];
   prompts: MCPPrompt[];
+  eventTypes: MCPEventType[];
   credentials?: OAuthCredentials;
   customHeaders?: Record<string, string>;
   logMessages: MCPLogMessage[];
