@@ -149,6 +149,13 @@ export function LLMSettingsModal({ isOpen, onClose, onSettingsChange, currentSet
       }
       const { models } = await res.json();
       setFetchedModels(prev => ({ ...prev, [provider]: models }));
+      // Auto-correct stale model selection: if current model isn't in the list, pick the first one
+      if (models.length > 0 && config.model) {
+        const modelExists = models.some((m: { id: string }) => m.id === config.model);
+        if (!modelExists) {
+          updateProviderConfig(provider, { model: models[0].id });
+        }
+      }
     } catch (err) {
       console.error(`Failed to fetch ${provider} models:`, err);
     } finally {
