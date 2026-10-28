@@ -35,7 +35,10 @@ async function fetchNvidiaModels(apiKey: string, baseUrl?: string): Promise<Mode
   });
   if (!res.ok) throw new Error(`NVIDIA: ${res.status}`);
   const data = await res.json();
+  // UUID pattern: filter out function IDs that aren't valid model slugs
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   return (data.data || [])
+    .filter((m: { id: string }) => !uuidRe.test(m.id))
     .map((m: { id: string }) => ({
       id: m.id,
       name: m.id.split('/').pop() || m.id,

@@ -555,6 +555,12 @@ async function callOpenAICompatible(request: ChatRequest): Promise<Response> {
     throw new Error('Base URL is required for this provider');
   }
 
+  // Guard: reject UUID-style model IDs (NVIDIA returns function IDs that 404)
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRe.test(request.model)) {
+    throw new Error(`Invalid model ID "${request.model}". Please select a valid model (e.g. meta/llama-3.1-8b-instruct) from the model list.`);
+  }
+
   const messages = convertMessagesForOpenAI(request.messages, request.systemPrompt);
   const tools = convertToolsForOpenAI(request.tools);
 
