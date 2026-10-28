@@ -93,6 +93,8 @@ interface ServerConnection {
     timeout: NodeJS.Timeout;
   }>;
   abortController: AbortController | null;
+  // SEP-2549: TTL cache for list results
+  listCache: Map<string, { data: unknown[]; fetchedAt: number; ttlMs: number; cacheScope?: string }>;
 }
 
 interface StoredServer {
@@ -213,6 +215,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-mcp-server-url': targetUrl,
+      // SEP-2243: HTTP routing headers
+      'Mcp-Method': method,
     };
 
     if (connection.credentials) {
@@ -312,6 +316,17 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     return { ...(params || {}), _meta: meta };
   }, []);
 
+  // SEP-2243: Extract Mcp-Method and Mcp-Name headers for routing
+  const getMcpRoutingHeaders = useCallback((method: string, params?: Record<string, unknown>): Record<string, string> => {
+    const h: Record<string, string> = { 'Mcp-Method': method };
+    // Extract name from params for tools/call, resources/read, prompts/get, etc.
+    const name = params?.name as string | undefined;
+    const uri = params?.uri as string | undefined;
+    if (name) h['Mcp-Name'] = name;
+    else if (uri) h['Mcp-Name'] = uri;
+    return h;
+  }, []);
+
   // Send a JSON-RPC request to a specific server
   const sendRequest = useCallback(async (serverId: string, method: string, params?: Record<string, unknown>): Promise<unknown> => {
     const connection = connectionsRef.current.get(serverId);
@@ -337,6 +352,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'x-mcp-server-url': connection.serverUrl,
+        // SEP-2243: HTTP routing headers
+        ...getMcpRoutingHeaders(method, params),
       };
 
       if (connection.credentials) {
@@ -553,6 +570,20 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
   const fetchAllWithPagination = useCallback(async (serverId: string, method: string, itemsKey: string): Promise<unknown[]> => {
     let allItems: unknown[] = [];
     let cursor: string | undefined;
+    let lastTtlMs = 0;
+    let lastCacheScope: string | undefined;
+
+    // SEP-2549: Check TTL cache before fetching
+    const connection = connectionsRef.current.get(serverId);
+    if (connection) {
+      const cached = connection.listCache.get(method);
+      if (cached && cached.ttlMs > 0) {
+        const age = Date.now() - cached.fetchedAt;
+        if (age < cached.ttlMs) {
+          return cached.data;
+        }
+      }
+    }
 
     do {
       const params: Record<string, unknown> = {};
@@ -564,7 +595,21 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       const items = (result[itemsKey] as unknown[]) || [];
       allItems = allItems.concat(items);
       cursor = result.nextCursor as string | undefined;
+
+      // SEP-2549: Capture TTL hints from the last page
+      if (typeof result.ttlMs === 'number') lastTtlMs = result.ttlMs;
+      if (typeof result.cacheScope === 'string') lastCacheScope = result.cacheScope;
     } while (cursor);
+
+    // SEP-2549: Store in cache if TTL > 0
+    if (connection && lastTtlMs > 0) {
+      connection.listCache.set(method, {
+        data: allItems,
+        fetchedAt: Date.now(),
+        ttlMs: lastTtlMs,
+        cacheScope: lastCacheScope,
+      });
+    }
 
     return allItems;
   }, [sendRequest]);
@@ -574,25 +619,31 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     const connection = connectionsRef.current.get(serverId);
 
     if (method === 'notifications/tools/list_changed') {
+      // SEP-2549: Invalidate TTL cache before re-fetching
+      connection?.listCache.delete('tools/list');
       // Re-fetch tools list
-      sendRequest(serverId, 'tools/list').then(result => {
-        const tools = (result as { tools: MCPTool[] }).tools || [];
+      fetchAllWithPagination(serverId, 'tools/list', 'tools').then(result => {
+        const tools = (result as MCPTool[]) || [];
         updateServer(serverId, { tools });
       }).catch(err => console.error(`[${serverId}] Failed to re-fetch tools:`, err));
     } else if (method === 'notifications/resources/list_changed') {
+      connection?.listCache.delete('resources/list');
+      connection?.listCache.delete('resources/templates/list');
       // Re-fetch resources list
-      sendRequest(serverId, 'resources/list').then(result => {
-        const rawResources = (result as { resources: MCPResource[] }).resources || [];
+      fetchAllWithPagination(serverId, 'resources/list', 'resources').then(result => {
+        const rawResources = (result as MCPResource[]) || [];
         const resources = rawResources.map(normalizeResource);
         updateServer(serverId, { resources });
       }).catch(err => console.error(`[${serverId}] Failed to re-fetch resources:`, err));
     } else if (method === 'notifications/prompts/list_changed') {
+      connection?.listCache.delete('prompts/list');
       // Re-fetch prompts list
-      sendRequest(serverId, 'prompts/list').then(result => {
-        const prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
+      fetchAllWithPagination(serverId, 'prompts/list', 'prompts').then(result => {
+        const prompts = (result as MCPPrompt[]) || [];
         updateServer(serverId, { prompts });
       }).catch(err => console.error(`[${serverId}] Failed to re-fetch prompts:`, err));
     } else if (method === 'notifications/events/list_changed') {
+      connection?.listCache.delete('events/list');
       // Re-fetch event types (SEP-3415 Events extension)
       fetchAllWithPagination(serverId, 'events/list', 'events').then(result => {
         const eventTypes = (result as MCPEventType[]) || [];
@@ -851,6 +902,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       negotiatedVersion: MCP_PROTOCOL_VERSION_NEW,
       pendingRequests: new Map(),
       abortController: new AbortController(),
+      listCache: new Map(),
     };
 
     connectionsRef.current.set(serverId, connection);

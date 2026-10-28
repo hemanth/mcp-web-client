@@ -9,6 +9,9 @@ export async function POST(request: NextRequest) {
   const authorization = request.headers.get('authorization');
   const sessionId = request.headers.get('x-mcp-session-id');
   const customHeadersJson = request.headers.get('x-mcp-custom-headers');
+  // SEP-2243: HTTP routing headers
+  const mcpMethod = request.headers.get('mcp-method');
+  const mcpName = request.headers.get('mcp-name');
 
   if (!serverUrl) {
     return new Response('Missing x-mcp-server-url header', { status: 400 });
@@ -35,6 +38,10 @@ export async function POST(request: NextRequest) {
       headers['Mcp-Session-Id'] = sessionId;
       console.log('Forwarding session ID to MCP server:', sessionId);
     }
+
+    // SEP-2243: Forward HTTP routing headers to the upstream MCP server
+    if (mcpMethod) headers['Mcp-Method'] = mcpMethod;
+    if (mcpName) headers['Mcp-Name'] = mcpName;
 
     // Parse and apply custom headers
     if (customHeadersJson) {

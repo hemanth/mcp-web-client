@@ -8,6 +8,9 @@ export async function POST(request: NextRequest) {
   const authorization = request.headers.get('authorization');
   const sessionId = request.headers.get('x-mcp-session-id');
   const customHeadersJson = request.headers.get('x-mcp-custom-headers');
+  // SEP-2243: HTTP routing headers
+  const mcpMethod = request.headers.get('mcp-method');
+  const mcpName = request.headers.get('mcp-name');
 
   if (!serverUrl) {
     return NextResponse.json(
@@ -47,6 +50,10 @@ export async function POST(request: NextRequest) {
     if (sessionId) {
       headers['X-MCP-Session-ID'] = sessionId;
     }
+
+    // SEP-2243: Forward HTTP routing headers
+    if (mcpMethod) headers['Mcp-Method'] = mcpMethod;
+    if (mcpName) headers['Mcp-Name'] = mcpName;
 
     // Parse and apply custom headers
     if (customHeadersJson) {
