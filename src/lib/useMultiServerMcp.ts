@@ -30,6 +30,8 @@ import type {
   MCPEventOccurrence,
   MCPEventPollResult,
   EventSubscription,
+  MCPTask,
+  MCPSkill,
 } from './types';
 
 // Helper to normalize resource - some servers swap name/uri
@@ -121,6 +123,8 @@ function loadStoredServers(): (ServerInstance & { wasConnected?: boolean })[] {
       resourceTemplates: [],
       prompts: [],
       eventTypes: [],
+      tasks: [],
+      skills: [],
       wasConnected: s.wasConnected,
       customHeaders: s.customHeaders,
       logMessages: [],
@@ -301,13 +305,23 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       // Old servers don't understand _meta protocol fields
       return undefined;
     }
-    return {
+    const meta: Record<string, unknown> = {
       'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION_NEW,
       'io.modelcontextprotocol/clientInfo': {
         name: 'MCP Web Client',
         version: '2026-07-28',
       },
     };
+
+    // SEP-414: OpenTelemetry trace context propagation
+    // Generate a W3C traceparent header for request tracing
+    const traceId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    const spanId = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    meta.traceparent = `00-${traceId}-${spanId}-01`;
+
+    return meta;
   }, []);
 
   // Inject _meta into request params for 2026-07-28 servers
@@ -827,6 +841,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       resourceTemplates: [],
       prompts: [],
       eventTypes: [],
+      tasks: [],
+      skills: [],
       credentials,
       transport,
       customHeaders,
@@ -1140,6 +1156,16 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         );
       }
 
+      // SEP-2640: Skills extension
+      const hasSkills = extensions?.['io.modelcontextprotocol/skills'] != null;
+      if (hasSkills) {
+        promises.push(
+          fetchAllWithPagination(serverId, 'skills/list', 'skills')
+            .then(result => ({ type: 'skills', result: { skills: result } }))
+            .catch(() => ({ type: 'skills', result: { skills: [] } }))
+        );
+      }
+
       const results = await Promise.all(promises);
 
       let tools: MCPTool[] = [];
@@ -1147,6 +1173,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       let resourceTemplates: MCPResourceTemplate[] = [];
       let prompts: MCPPrompt[] = [];
       let eventTypes: MCPEventType[] = [];
+      let skills: MCPSkill[] = [];
 
       for (const { type, result } of results) {
         if (type === 'tools') {
@@ -1160,6 +1187,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
           prompts = (result as { prompts: MCPPrompt[] }).prompts || [];
         } else if (type === 'events') {
           eventTypes = (result as { events: MCPEventType[] }).events || [];
+        } else if (type === 'skills') {
+          skills = (result as { skills: MCPSkill[] }).skills || [];
         }
       }
 
@@ -1174,6 +1203,7 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
         resourceTemplates,
         prompts,
         eventTypes,
+        skills,
         error: undefined,
       });
 
@@ -1226,6 +1256,8 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
       resourceTemplates: [],
       prompts: [],
       eventTypes: [],
+      tasks: [],
+      skills: [],
       serverInfo: undefined,
       capabilities: undefined,
       error: undefined,
@@ -1635,6 +1667,27 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     return () => clearTimeout(timer);
   }, [isInitialized, servers, connectServer]);
 
+  // SEP-2663: Task management methods
+  const getTask = useCallback(async (serverId: string, taskId: string): Promise<MCPTask> => {
+    const result = await sendRequest(serverId, 'tasks/get', { taskId });
+    return result as MCPTask;
+  }, [sendRequest]);
+
+  const cancelTask = useCallback(async (serverId: string, taskId: string): Promise<void> => {
+    await sendRequest(serverId, 'tasks/cancel', { taskId });
+  }, [sendRequest]);
+
+  const updateTask = useCallback(async (serverId: string, taskId: string, inputResponses: Record<string, unknown>): Promise<void> => {
+    await sendRequest(serverId, 'tasks/update', { taskId, inputResponses });
+  }, [sendRequest]);
+
+  // SEP-2640: Skills methods
+  const getSkillContent = useCallback(async (serverId: string, uri: string): Promise<string> => {
+    const result = await sendRequest(serverId, 'resources/read', { uri });
+    const contents = (result as { contents: Array<{ text?: string }> }).contents || [];
+    return contents.map(c => c.text || '').join('\n');
+  }, [sendRequest]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -1677,5 +1730,11 @@ export function useMultiServerMcp(options: UseMultiServerMcpOptions = {}) {
     startEventPoll,
     stopEventPoll,
     clearEventHistory,
+    // SEP-2663: Tasks
+    getTask,
+    cancelTask,
+    updateTask,
+    // SEP-2640: Skills
+    getSkillContent,
   };
 }

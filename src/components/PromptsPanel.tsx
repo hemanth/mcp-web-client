@@ -58,11 +58,18 @@ const PromptCard = memo(function PromptCard({ prompt, onGet, disabled }: PromptC
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-[var(--background-tertiary)] transition-colors"
       >
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
-            <BookOpen className="w-4 h-4 text-purple-400" />
-          </div>
+          {/* SEP-973: Show prompt icon if available */}
+          {prompt.icons && prompt.icons.length > 0 ? (
+            <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+              <img src={prompt.icons[0].src} alt="" className="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <BookOpen className="w-4 h-4 text-purple-400" />
+            </div>
+          )}
           <div className="text-left">
-            <span className="font-medium text-sm">{prompt.name}</span>
+            <span className="font-medium text-sm">{prompt.title || prompt.name}</span>
             {prompt.description && (
               <p className="text-xs text-[var(--foreground-muted)] truncate max-w-xs">{prompt.description}</p>
             )}

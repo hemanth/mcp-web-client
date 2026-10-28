@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { Server, Wrench, FileText, BookOpen, Bell, X } from 'lucide-react';
+import { Server, Wrench, FileText, BookOpen, Bell, X, ExternalLink, Clock, BookMarked } from 'lucide-react';
 import type { MCPServerInfo, MCPCapabilities } from '@/lib/types';
 
 interface ServerInfoProps {
@@ -11,6 +11,8 @@ interface ServerInfoProps {
   resourcesCount: number;
   promptsCount: number;
   eventsCount?: number;
+  tasksCount?: number;
+  skillsCount?: number;
 }
 
 export const ServerInfo = memo(function ServerInfo({
@@ -20,6 +22,8 @@ export const ServerInfo = memo(function ServerInfo({
   resourcesCount,
   promptsCount,
   eventsCount = 0,
+  tasksCount = 0,
+  skillsCount = 0,
 }: ServerInfoProps) {
   if (!serverInfo) {
     return null;
@@ -30,18 +34,39 @@ export const ServerInfo = memo(function ServerInfo({
     { name: 'Resources', enabled: capabilities?.resources !== undefined, icon: FileText, count: resourcesCount, color: 'text-blue-400', bg: 'bg-blue-500/10' },
     { name: 'Prompts', enabled: capabilities?.prompts !== undefined, icon: BookOpen, count: promptsCount, color: 'text-purple-400', bg: 'bg-purple-500/10' },
     ...(eventsCount > 0 ? [{ name: 'Events', enabled: true, icon: Bell, count: eventsCount, color: 'text-amber-400', bg: 'bg-amber-500/10' }] : []),
+    ...(tasksCount > 0 ? [{ name: 'Tasks', enabled: true, icon: Clock, count: tasksCount, color: 'text-cyan-400', bg: 'bg-cyan-500/10' }] : []),
+    ...(skillsCount > 0 ? [{ name: 'Skills', enabled: true, icon: BookMarked, count: skillsCount, color: 'text-teal-400', bg: 'bg-teal-500/10' }] : []),
   ];
 
   return (
     <div className="space-y-4">
       {/* Server Info Header */}
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl bg-[var(--success)]/10 flex items-center justify-center flex-shrink-0">
-          <Server className="w-5 h-5 text-[var(--success)]" />
-        </div>
+        {/* SEP-973: Show server icon if available */}
+        {serverInfo.icons && serverInfo.icons.length > 0 ? (
+          <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0">
+            <img src={serverInfo.icons[0].src} alt="" className="w-full h-full object-cover" />
+          </div>
+        ) : (
+          <div className="w-10 h-10 rounded-xl bg-[var(--success)]/10 flex items-center justify-center flex-shrink-0">
+            <Server className="w-5 h-5 text-[var(--success)]" />
+          </div>
+        )}
         <div className="min-w-0">
-          <h3 className="font-semibold text-sm truncate">{serverInfo.name}</h3>
+          <h3 className="font-semibold text-sm truncate">{serverInfo.title || serverInfo.name}</h3>
           <p className="text-xs text-[var(--foreground-muted)]">v{serverInfo.version}</p>
+          {/* SEP-973: Show websiteUrl */}
+          {serverInfo.websiteUrl && (
+            <a
+              href={serverInfo.websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline mt-0.5"
+            >
+              <ExternalLink className="w-3 h-3" />
+              {new URL(serverInfo.websiteUrl).hostname}
+            </a>
+          )}
         </div>
       </div>
 

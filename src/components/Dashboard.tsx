@@ -30,6 +30,8 @@ import {
   X,
   Github,
   LogIn,
+  Clock,
+  BookMarked,
 } from 'lucide-react';
 
 // Dynamic imports for code splitting - panels are lazy loaded
@@ -38,8 +40,10 @@ const ToolsPanel = lazy(() => import('@/components/ToolsPanel').then(m => ({ def
 const ResourcesPanel = lazy(() => import('@/components/ResourcesPanel').then(m => ({ default: m.ResourcesPanel })));
 const PromptsPanel = lazy(() => import('@/components/PromptsPanel').then(m => ({ default: m.PromptsPanel })));
 const EventsPanel = lazy(() => import('@/components/EventsPanel').then(m => ({ default: m.EventsPanel })));
+const TasksPanel = lazy(() => import('@/components/TasksPanel').then(m => ({ default: m.TasksPanel })));
+const SkillsPanel = lazy(() => import('@/components/SkillsPanel').then(m => ({ default: m.SkillsPanel })));
 
-type ActivePanel = 'chat' | 'tools' | 'resources' | 'prompts' | 'events';
+type ActivePanel = 'chat' | 'tools' | 'resources' | 'prompts' | 'events' | 'tasks' | 'skills';
 
 // Loading fallback component
 const PanelLoader = memo(function PanelLoader() {
@@ -141,6 +145,11 @@ export default function Dashboard() {
     startEventPoll,
     stopEventPoll,
     clearEventHistory,
+    // SEP-2663: Tasks
+    getTask,
+    cancelTask,
+    // SEP-2640: Skills
+    getSkillContent,
   } = useMultiServerMcp({
     onError: useCallback((serverId: string, error: Error) => {
       toast.error(error.message);
@@ -391,6 +400,8 @@ export default function Dashboard() {
   // Tools for the active server (for the Tools panel)
   const currentTools = activeServer?.tools || [];
   const currentEventTypes = activeServer?.eventTypes || [];
+  const currentTasks = activeServer?.tasks || [];
+  const currentSkills = activeServer?.skills || [];
 
   const navItems = [
     { id: 'chat' as const, label: 'Chat', icon: MessageSquare, count: null },
@@ -399,6 +410,12 @@ export default function Dashboard() {
     { id: 'prompts' as const, label: 'Prompts', icon: BookOpen, count: currentPrompts.length },
     ...(currentEventTypes.length > 0
       ? [{ id: 'events' as const, label: 'Events', icon: Bell, count: currentEventTypes.length }]
+      : []),
+    ...(currentTasks.length > 0
+      ? [{ id: 'tasks' as const, label: 'Tasks', icon: Clock, count: currentTasks.length }]
+      : []),
+    ...(currentSkills.length > 0
+      ? [{ id: 'skills' as const, label: 'Skills', icon: BookMarked, count: currentSkills.length }]
       : []),
   ];
 
@@ -569,6 +586,8 @@ export default function Dashboard() {
               resourcesCount={currentResources.length}
               promptsCount={currentPrompts.length}
               eventsCount={currentEventTypes.length}
+              tasksCount={currentTasks.length}
+              skillsCount={currentSkills.length}
             />
             <button
               onClick={() => {
@@ -634,6 +653,25 @@ export default function Dashboard() {
                     onStartPoll={startEventPoll}
                     onStopPoll={stopEventPoll}
                     onClearHistory={clearEventHistory}
+                    disabled={!isConnected}
+                  />
+                )}
+
+                {activePanel === 'tasks' && isConnected && activeServerId && (
+                  <TasksPanel
+                    tasks={currentTasks}
+                    serverId={activeServerId}
+                    onGetTask={getTask}
+                    onCancelTask={cancelTask}
+                    disabled={!isConnected}
+                  />
+                )}
+
+                {activePanel === 'skills' && isConnected && activeServerId && (
+                  <SkillsPanel
+                    skills={currentSkills}
+                    serverId={activeServerId}
+                    onGetContent={getSkillContent}
                     disabled={!isConnected}
                   />
                 )}

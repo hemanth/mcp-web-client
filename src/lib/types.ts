@@ -8,6 +8,11 @@ export interface MCPClientInfo {
 export interface MCPServerInfo {
   name: string;
   version: string;
+  // SEP-973: Metadata
+  title?: string;
+  description?: string;
+  icons?: Array<{ src: string; mimeType?: string; sizes?: string[]; theme?: 'light' | 'dark' }>;
+  websiteUrl?: string;
 }
 
 export interface MCPCapabilities {
@@ -50,6 +55,9 @@ export interface MCPTool {
   };
   outputSchema?: Record<string, unknown>;
   annotations?: MCPToolAnnotations;
+  // SEP-973: Metadata
+  title?: string;
+  icons?: Array<{ src: string; mimeType?: string; sizes?: string[]; theme?: 'light' | 'dark' }>;
 }
 
 export interface MCPResource {
@@ -57,6 +65,9 @@ export interface MCPResource {
   name: string;
   description?: string;
   mimeType?: string;
+  // SEP-973: Metadata
+  title?: string;
+  icons?: Array<{ src: string; mimeType?: string; sizes?: string[]; theme?: 'light' | 'dark' }>;
 }
 
 export interface MCPResourceTemplate {
@@ -64,6 +75,9 @@ export interface MCPResourceTemplate {
   name: string;
   description?: string;
   mimeType?: string;
+  // SEP-973: Metadata
+  title?: string;
+  icons?: Array<{ src: string; mimeType?: string; sizes?: string[]; theme?: 'light' | 'dark' }>;
 }
 
 export interface MCPPrompt {
@@ -74,6 +88,9 @@ export interface MCPPrompt {
     description?: string;
     required?: boolean;
   }>;
+  // SEP-973: Metadata
+  title?: string;
+  icons?: Array<{ src: string; mimeType?: string; sizes?: string[]; theme?: 'light' | 'dark' }>;
 }
 
 export interface MCPRequest {
@@ -257,6 +274,45 @@ export interface EventSubscription {
   receivedEvents: MCPEventOccurrence[];
 }
 
+// Tasks Extension Types (io.modelcontextprotocol/tasks — SEP-2663)
+
+export type TaskStatus = 'working' | 'input_required' | 'completed' | 'cancelled' | 'failed';
+
+export interface MCPTask {
+  taskId: string;
+  status: TaskStatus;
+  statusMessage?: string;
+  createdAt: string;
+  lastUpdatedAt?: string;
+  ttlMs?: number | null;
+  pollIntervalMs?: number;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+  _meta?: Record<string, unknown>;
+}
+
+// Skills Extension Types (io.modelcontextprotocol/skills — SEP-2640)
+
+export interface MCPSkillFile {
+  uri: string;
+  size?: number;
+  sha256?: string;
+}
+
+export interface MCPSkill {
+  uri: string;
+  name: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  files?: MCPSkillFile[];
+  dynamic?: boolean;
+  _meta?: Record<string, unknown>;
+}
+
 export interface ServerInstance {
   id: string;
   url: string;
@@ -271,6 +327,10 @@ export interface ServerInstance {
   resourceTemplates: MCPResourceTemplate[];
   prompts: MCPPrompt[];
   eventTypes: MCPEventType[];
+  // SEP-2663: Tasks
+  tasks: MCPTask[];
+  // SEP-2640: Skills
+  skills: MCPSkill[];
   credentials?: OAuthCredentials;
   customHeaders?: Record<string, string>;
   logMessages: MCPLogMessage[];
@@ -325,6 +385,19 @@ export interface CreateMessageRequestParams {
   maxTokens: number;
   stopSequences?: string[];
   metadata?: Record<string, unknown>;
+  // SEP-1577: Sampling with tools
+  tools?: Array<{
+    name: string;
+    description?: string;
+    inputSchema: {
+      type: string;
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+  }>;
+  toolChoice?: {
+    mode: 'auto' | 'required' | 'none';
+  };
 }
 
 export interface CreateMessageResult {

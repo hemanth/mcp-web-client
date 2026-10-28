@@ -357,11 +357,18 @@ const ResourceCard = memo(function ResourceCard({ resource, onRead, disabled }: 
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-[var(--background-tertiary)] transition-colors"
       >
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-            <Icon className="w-4 h-4 text-blue-400" />
-          </div>
+          {/* SEP-973: Show resource icon if available */}
+          {resource.icons && resource.icons.length > 0 ? (
+            <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+              <img src={resource.icons[0].src} alt="" className="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <Icon className="w-4 h-4 text-blue-400" />
+            </div>
+          )}
           <div className="text-left">
-            <span className="font-medium text-sm">{resource.name}</span>
+            <span className="font-medium text-sm">{resource.title || resource.name}</span>
             {resource.mimeType && (
               <span className="ml-2 px-2 py-0.5 rounded bg-[var(--background-tertiary)] text-[var(--foreground-muted)] text-xs">
                 {resource.mimeType}

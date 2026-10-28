@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, memo } from 'react';
-import { Wrench, Play, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check } from 'lucide-react';
+import { Wrench, Play, Loader2, ChevronDown, ChevronRight, AlertCircle, Copy, Check, Eye, Trash2, RotateCw, Globe } from 'lucide-react';
 import type { MCPTool, ToolCallResult } from '@/lib/types';
 
 interface ToolsPanelProps {
@@ -70,11 +70,41 @@ const ToolCard = memo(function ToolCard({ tool, onCall, disabled }: ToolCardProp
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-[var(--background-tertiary)] transition-colors"
       >
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[var(--accent)]/10 flex items-center justify-center">
-            <Wrench className="w-4 h-4 text-[var(--accent)]" />
-          </div>
+          {/* SEP-973: Show tool icon if available */}
+          {tool.icons && tool.icons.length > 0 ? (
+            <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+              <img src={tool.icons[0].src} alt="" className="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-[var(--accent)]/10 flex items-center justify-center">
+              <Wrench className="w-4 h-4 text-[var(--accent)]" />
+            </div>
+          )}
           <div className="text-left">
-            <span className="font-medium text-sm">{tool.name}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-sm">{tool.title || tool.name}</span>
+              {/* SEP-973: Annotation badges */}
+              {tool.annotations?.readOnlyHint && (
+                <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[10px] font-medium flex items-center gap-0.5">
+                  <Eye className="w-3 h-3" /> read-only
+                </span>
+              )}
+              {tool.annotations?.destructiveHint && (
+                <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 text-[10px] font-medium flex items-center gap-0.5">
+                  <Trash2 className="w-3 h-3" /> destructive
+                </span>
+              )}
+              {tool.annotations?.idempotentHint && (
+                <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 text-[10px] font-medium flex items-center gap-0.5">
+                  <RotateCw className="w-3 h-3" /> idempotent
+                </span>
+              )}
+              {tool.annotations?.openWorldHint && (
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 text-[10px] font-medium flex items-center gap-0.5">
+                  <Globe className="w-3 h-3" /> open-world
+                </span>
+              )}
+            </div>
             {tool.description && (
               <p className="text-xs text-[var(--foreground-muted)] truncate max-w-xs">{tool.description}</p>
             )}

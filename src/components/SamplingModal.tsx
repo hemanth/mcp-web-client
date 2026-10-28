@@ -14,6 +14,7 @@ import {
   Server,
   Thermometer,
   Hash,
+  Wrench,
 } from 'lucide-react';
 import type { SamplingRequest, SamplingMessage, SamplingMessageContent } from '@/lib/types';
 
@@ -148,6 +149,31 @@ export function SamplingModal({
                 <p className="mt-1 p-2 bg-[var(--background-tertiary)] rounded text-xs line-clamp-2">
                   {params.systemPrompt}
                 </p>
+              </div>
+            )}
+            {/* SEP-1577: Show tools if provided */}
+            {params.tools && params.tools.length > 0 && (
+              <div className="text-sm">
+                <div className="flex items-center gap-1.5 text-[var(--foreground-muted)] mb-1">
+                  <Wrench className="w-3 h-3" />
+                  <span>Tools ({params.tools.length})</span>
+                  {params.toolChoice && (
+                    <span className="px-1.5 py-0.5 rounded bg-[var(--background-tertiary)] text-[10px] font-medium">
+                      {params.toolChoice.mode}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {params.tools.map((tool, i) => (
+                    <div key={i} className="flex items-center gap-2 p-1.5 bg-[var(--background-tertiary)] rounded text-xs">
+                      <Wrench className="w-3 h-3 text-[var(--accent)]" />
+                      <span className="font-medium">{tool.name}</span>
+                      {tool.description && (
+                        <span className="text-[var(--foreground-muted)] truncate">{tool.description}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
