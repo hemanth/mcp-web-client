@@ -610,6 +610,10 @@ async function callOpenAICompatible(request: ChatRequest): Promise<Response> {
 
   if (!response.ok) {
     const error = await response.text();
+    // Provide actionable message for deprecated/EOL models
+    if (response.status === 410) {
+      throw new Error(`Model "${request.model}" has been retired. Please go to LLM Settings, refresh models, and pick a different one.`);
+    }
     throw new Error(`API error (${request.provider}): ${response.status} - ${error}`);
   }
 
